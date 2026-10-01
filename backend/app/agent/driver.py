@@ -179,7 +179,11 @@ class BrowserDriver:
         check = self._unwrap(check_result, "Reading the interviews table")
         rows = [InterviewRow(i.id, i.round, i.scheduled_at, i.interviewer, i.status)
                 for i in check.scheduled_interviews]
-        return CandidatePage(candidate_id, details.name, details.status, rows, check_result.screenshot)
+        invites = self._unwrap(self.browser.get_invitations(candidate_id), "Reading the invitations table")
+        return CandidatePage(
+            candidate_id, details.name, details.status, rows,
+            invitations=[InvitationRow(v.id, v.interview_id, v.to, v.subject, v.status) for v in invites],
+            email=details.email, job_title=details.job_title, screenshot=check_result.screenshot)
 
     def submit_interview(self, candidate_id: str, round_name: str, scheduled_at: str,
                          interviewer: str) -> SubmitResult:

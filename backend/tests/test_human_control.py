@@ -32,7 +32,7 @@ def wait_status(client, run_id, *statuses, timeout=30):
         if run["status"] in statuses:
             return run
         time.sleep(0.1)
-    raise AssertionError(f"run stayed '{run and run['status']}', wanted {statuses}")
+    raise AssertionError(f"run stayed '{run['status']}', wanted {statuses}: {run['blocker'] or run['summary']}")
 
 
 def app_state(harness):

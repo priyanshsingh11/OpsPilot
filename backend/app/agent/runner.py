@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 from . import events as ev
@@ -11,6 +12,8 @@ from .goal import GoalError, parse_interview_goal
 from .invitation import send_invitation_with_approval
 from .scenarios import SCENARIOS
 from .scheduling import InterviewRequest, ensure_status, schedule_interview
+
+logger = logging.getLogger("opspilot.agent")
 
 TARGET_STATUS = "interview"
 
@@ -55,6 +58,7 @@ def run_goal(goal: str, driver: BrowserDriver, harness: HarnessClient, log: ev.R
     except AppUnavailable as exc:
         return _blocked(log, f"Recruitment app unavailable: {exc}")
     except Exception as exc:  # never leave a run without a terminal event
+        logger.exception("unexpected agent error")
         return _blocked(log, f"Unexpected agent error: {exc.__class__.__name__}: {exc}")
 
 
