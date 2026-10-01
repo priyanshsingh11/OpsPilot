@@ -5,6 +5,7 @@ every process start. No real candidate data is used anywhere.
 """
 
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 
 
 CANDIDATE_STATUSES = [
@@ -51,6 +52,7 @@ class Interview:
     scheduled_at: str  # ISO 8601
     interviewer: str
     status: str = "scheduled"
+    duration_minutes: int = 60
 
 
 JOBS: list[Job] = [
@@ -85,6 +87,14 @@ JOBS: list[Job] = [
         location="Mumbai",
         status="open",
         hiring_manager="Vikram Mehta",
+    ),
+    Job(
+        id="job-full-stack-engineer",
+        title="Full Stack Engineer",
+        department="Engineering",
+        location="Hyderabad",
+        status="open",
+        hiring_manager="Neha Kulkarni",
     ),
     Job(
         id="job-ml-engineer",
@@ -173,6 +183,37 @@ CANDIDATES: list[Candidate] = [
         skills=["Java", "Spring", "MySQL"],
         summary="Solid enterprise backend experience; some exposure to event-driven design.",
     ),
+    # --- Full Stack Engineer pipeline ---
+    Candidate(
+        id="cand-kavya",
+        name="Kavya Menon",
+        email="kavya.menon@example.com",
+        job_id="job-full-stack-engineer",
+        status="shortlisted",
+        experience_years=4,
+        skills=["TypeScript", "React", "Node.js", "PostgreSQL"],
+        summary="Built the customer dashboard and billing flows for a B2B SaaS startup.",
+    ),
+    Candidate(
+        id="cand-rehan",
+        name="Rehan Qureshi",
+        email="rehan.qureshi@example.com",
+        job_id="job-full-stack-engineer",
+        status="shortlisted",
+        experience_years=6,
+        skills=["Next.js", "Python", "FastAPI", "AWS"],
+        summary="Tech lead on an internal tools team; owns features from schema to UI.",
+    ),
+    Candidate(
+        id="cand-zoya",
+        name="Zoya Fernandes",
+        email="zoya.fernandes@example.com",
+        job_id="job-full-stack-engineer",
+        status="applied",
+        experience_years=2,
+        skills=["JavaScript", "Vue", "Django"],
+        summary="Junior full stack developer at a logistics startup.",
+    ),
     # --- Data Scientist pipeline ---
     Candidate(
         id="cand-arjun",
@@ -198,14 +239,24 @@ CANDIDATES: list[Candidate] = [
     ),
 ]
 
+def next_business_day(today: date | None = None) -> date:
+    d = (today or date.today()) + timedelta(days=1)
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    return d
+
+
+# Relative to today, so "tomorrow afternoon" in a demo always meets this existing booking
+# (Priya Nair is busy 14:00-15:00 on the next business day) and slot finding has to work around it.
 INTERVIEWS: list[Interview] = [
     Interview(
         id="int-seed-1",
         candidate_id="cand-sneha",
         job_id="job-ai-engineer",
         round="Technical Screen",
-        scheduled_at="2026-10-06T14:00:00",
+        scheduled_at=f"{next_business_day().isoformat()}T14:00",
         interviewer="Priya Nair",
         status="scheduled",
+        duration_minutes=60,
     ),
 ]

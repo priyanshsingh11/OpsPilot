@@ -114,3 +114,5 @@
 .email dt { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .email dd { font-size: 14px; }
 .emailBody { white-space: pre-wrap; }
+
+.remaining { margin: 4px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 14px; }

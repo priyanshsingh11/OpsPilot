@@ -31,6 +31,10 @@ class InvitationOutcome:
         return self.status in ("sent", "already_sent")
 
 
+def _article(word: str) -> str:
+    return "an" if word[:1].lower() in "aeiou" else "a"
+
+
 def compose(req: InterviewRequest, candidate_email: str, job_title: str, interview_id: str) -> dict:
     """The exact email, built from facts the agent read in the app. This is what the user approves."""
     when = datetime.fromisoformat(req.scheduled_at)
@@ -42,7 +46,7 @@ def compose(req: InterviewRequest, candidate_email: str, job_title: str, intervi
         "subject": f"Interview invitation: {req.round_name} for {job_title or 'the open role'}",
         "message": (
             f"Hi {first},\n\n"
-            f"We'd like to invite you to a {req.round_name} for the {job_title or 'open'} role on "
+            f"We'd like to invite you to {_article(req.round_name)} {req.round_name} for the {job_title or 'open'} role on "
             f"{when:%A, %d %B %Y} at {when:%H:%M} with {req.interviewer}.\n\n"
             "Please reply to this email to confirm your availability.\n\n"
             "Thanks,\nThe Recruiting Team"

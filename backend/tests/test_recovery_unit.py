@@ -27,7 +27,7 @@ class FakeDriver:
             raise AppUnavailable("connection refused")
         return CandidatePage(cid, "Test Person", "shortlisted", list(self.rows))
 
-    def submit_interview(self, cid, round_name, scheduled_at, interviewer):
+    def submit_interview(self, cid, round_name, scheduled_at, interviewer, duration_minutes=60):
         self.submits += 1
         res = self.results[self.submits - 1]
         if res.ok or self.submits in self.saves_on:

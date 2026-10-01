@@ -1,52 +1,37 @@
-# Synthetic Recruitment Application
+# Synthetic recruitment app
 
-A small FastAPI + Jinja2 app that simulates a recruiting system. It exists so
-the OpsPilot browser automation layer (Phase 3) has a realistic application to
-operate. All data is synthetic and lives in memory — it is re-seeded on every
-process start.
-
-## Run
+The application OpsPilot operates. A small FastAPI + Jinja2 app with server-rendered pages and
+stable `data-testid` attributes. All data is synthetic, lives in memory, and is re-seeded on every
+start (or `POST /admin/reset`). It is not part of the agent: the agent only sees it through a browser.
 
 ```bash
-cd demo-app
-../.venv/bin/uvicorn app.main:app --port 5000
+cd demo-app && ../.venv/bin/uvicorn app.main:app --port 5050     # http://127.0.0.1:5050/jobs
+../.venv/bin/python -m pytest tests -q                           # run from demo-app/, or from the repo root
 ```
 
-Then open http://127.0.0.1:5000/jobs.
+(Port 5000 is avoided because macOS AirPlay Receiver holds it.)
 
 ## Pages
 
 | Route | Purpose |
 |---|---|
-| `/jobs` | List all jobs |
-| `/jobs/{job_id}` | Job detail + candidates; filter with `?status=` and `?q=` |
-| `/candidates/{id}` | Candidate profile, status form, interviews |
+| `/jobs`, `/jobs/{id}` | Jobs; a job's candidates, filter with `?status=` and `?q=` |
+| `/candidates/{id}` | Profile, status form, interviews table, invitation form and table |
 | `/candidates/{id}/interviews/new` | Schedule-interview form |
-| `/interviews` | All interviews + chaos-mode toggle |
+| `/interviews` | All interviews, plus the chaos-mode toggle and the failure-plan state |
 
-## Chaos mode
+## Failure simulation
 
-The interviews page has a **chaos mode** toggle. While enabled, scheduling a
-new interview fails with a `500` error page (`data-testid="error-banner"`).
-This simulates an interview-service outage so the automation layer can be
-tested against a realistic failure without any external dependencies.
+- **Failure plan**: the next N interview creations fail, in `before_write` (nothing saved) or
+  `after_write` (saved, but an error is returned) mode. Arm it with `POST /admin/failure`
+  (`remaining`, `mode`) or at startup: `DEMO_FAILING_ATTEMPTS=1 DEMO_FAILURE_MODE=after_write`.
+  The dashboard's "Failure scenario" picker uses the same endpoint.
+- **Chaos mode**: the toggle on `/interviews` makes every creation fail until switched off.
 
-## Deterministic failure plan (Phase 5)
+Like a real mail or calendar service, the app does **not** dedupe: creating or sending twice
+creates two records. Preventing that is the agent's job.
 
-Besides chaos mode, `POST /admin/failure` (`remaining`, `mode`) makes the next
-N interview creates fail:
+## Harness endpoints (local use only, no authentication)
 
-- `before_write` — nothing is saved, and a 500 is returned.
-- `after_write` — the interview **is saved**, but a 500 is still returned (like a calendar
-  sync timing out after commit). A blind retry would create a duplicate, because the app
-  does not reject duplicates.
-
-The plan is shown on `/interviews`. `POST /admin/reset` restores seed data and re-arms
-the plan from `DEMO_FAILING_ATTEMPTS` / `DEMO_FAILURE_MODE`. `GET /api/state` returns a
-read-only JSON snapshot that verification code uses.
-
-## Data
-
-Seeded in `app/models.py`: 5 jobs, 9 candidates across pipelines, 1 interview.
-Candidate statuses: `applied`, `screening`, `shortlisted`, `interview`,
-`offer`, `hired`, `rejected`.
+`POST /admin/reset`, `POST /admin/failure`, `POST /admin/chaos`, and the read-only `GET /api/state`
+JSON snapshot used by the verifier.

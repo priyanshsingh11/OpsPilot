@@ -95,6 +95,7 @@ class RecruitmentBrowser:
         round_name: str,
         scheduled_at: str,
         interviewer: str,
+        duration_minutes: int | None = None,
     ) -> ActionResult[InterviewDetails]:
         """Schedule an interview for a candidate via the interview form.
 
@@ -103,7 +104,8 @@ class RecruitmentBrowser:
         """
         return self._run(
             "create_interview",
-            lambda: self._do_create_interview(candidate_id, round_name, scheduled_at, interviewer),
+            lambda: self._do_create_interview(candidate_id, round_name, scheduled_at, interviewer,
+                                              duration_minutes),
         )
 
     def update_candidate_status(self, candidate_id: str, status: str) -> ActionResult[StatusUpdate]:
@@ -250,7 +252,8 @@ class RecruitmentBrowser:
         )
 
     def _do_create_interview(
-        self, candidate_id: str, round_name: str, scheduled_at: str, interviewer: str
+        self, candidate_id: str, round_name: str, scheduled_at: str, interviewer: str,
+        duration_minutes: int | None = None,
     ) -> InterviewDetails:
         self.session.goto(f"/candidates/{candidate_id}")
         self.session.page.wait_for_selector('[data-testid="schedule-interview-link"]')
@@ -260,6 +263,8 @@ class RecruitmentBrowser:
         self.session.page.fill('[data-testid="interview-round"]', round_name)
         self.session.page.fill('[data-testid="interview-scheduled-at"]', scheduled_at)
         self.session.page.fill('[data-testid="interview-interviewer"]', interviewer)
+        if duration_minutes is not None:
+            self.session.page.fill('[data-testid="interview-duration"]', str(duration_minutes))
         self.session.page.click('[data-testid="interview-submit"]')
 
         # The form either redirects back to the candidate page (success) or
@@ -392,6 +397,7 @@ class RecruitmentBrowser:
                     scheduled_at=cells[1].inner_text().strip(),
                     interviewer=cells[2].inner_text().strip(),
                     status=cells[3].inner_text().strip(),
+                    duration_minutes=_minutes(cells[4].inner_text()) if len(cells) > 4 else None,
                 )
             )
         return interviews
@@ -426,8 +432,12 @@ class RecruitmentBrowser:
         return match.group(1) if match else ""
 
     def _job_title_from_breadcrumb(self) -> str:
+        title = self.session.page.query_selector('[data-testid="candidate-job-title"]')
+        if title is not None:
+            return title.inner_text().strip()
         breadcrumb = self.session.page.query_selector('a[href^="/jobs/"]')
-        return breadcrumb.inner_text().strip() if breadcrumb else ""
+        text = breadcrumb.inner_text().strip() if breadcrumb else ""
+        return re.sub(r"^\W*Back to\s+", "", text)
 
     # --- Runner: timing, error conversion, screenshots ---
 
@@ -481,6 +491,11 @@ class RecruitmentBrowser:
             return self.session.page.url if self.session.is_launched else None
         except Exception:  # noqa: BLE001
             return None
+
+
+def _minutes(text: str) -> int | None:
+    match = re.match(r"\s*(\d+)", text)
+    return int(match.group(1)) if match else None
 
 
 class _ServerActionError(Exception):

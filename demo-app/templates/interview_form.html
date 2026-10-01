@@ -16,6 +16,9 @@
   <label for="scheduled_at">Scheduled at</label>
   <input id="scheduled_at" name="scheduled_at" type="datetime-local" required data-testid="interview-scheduled-at">
 
+  <label for="duration_minutes">Duration (minutes)</label>
+  <input id="duration_minutes" name="duration_minutes" type="number" min="15" max="240" step="15" value="60" required data-testid="interview-duration">
+
   <label for="interviewer">Interviewer</label>
   <input id="interviewer" name="interviewer" type="text" required placeholder="e.g. Priya Nair" data-testid="interview-interviewer">
 

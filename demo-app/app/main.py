@@ -168,6 +168,7 @@ def create_interview(
     round_name: str = Form(...),
     scheduled_at: str = Form(...),
     interviewer: str = Form(...),
+    duration_minutes: int = Form(60),
 ) -> HTMLResponse:
     candidate = store.get_candidate(candidate_id)
     if candidate is None:
@@ -179,13 +180,15 @@ def create_interview(
         )
     try:
         datetime.fromisoformat(scheduled_at)
+        if not 15 <= duration_minutes <= 240:
+            raise ValueError
     except ValueError:
         return templates.TemplateResponse(
             request,
             "interview_form.html",
             {
                 "candidate": candidate,
-                "error": "Scheduled time must be a valid date/time",
+                "error": "Scheduled time must be a valid date/time and duration 15-240 minutes",
                 "now": _now(),
             },
             status_code=400,
@@ -197,6 +200,7 @@ def create_interview(
             round_name=round_name,
             scheduled_at=scheduled_at,
             interviewer=interviewer,
+            duration_minutes=duration_minutes,
         )
     except InterviewServiceError as exc:
         # Simulated outage: render a 500 error page the automation can detect.

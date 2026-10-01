@@ -8,6 +8,7 @@ be resumed: the agent re-checks the app's state at every step, so resuming never
 
 from __future__ import annotations
 
+import logging
 import threading
 import uuid
 from typing import Callable
@@ -20,6 +21,9 @@ from .events import RunLog
 from .events import STOPPED
 from .runner import AgentOptions, RunResult, run_goal
 from .store import ACTIVE_STATUSES, RunStore
+
+
+logger = logging.getLogger("opspilot.agent")
 
 
 class RunInProgress(Exception):
@@ -103,8 +107,8 @@ class RunManager:
                 if tool is not None:
                     try:
                         tool.close()
-                    except Exception:
-                        pass
+                    except Exception:  # cleanup must not hide the run's real outcome
+                        logger.warning("could not close %s", type(tool).__name__, exc_info=True)
         self.store.cancel_pending(run_id)  # no approval stays open once the run has ended
         self.store.finish_run(run_id, result.status, result.summary, result.blocker, result.details, log.events)
         with self._lock:

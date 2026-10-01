@@ -49,6 +49,7 @@ const stepsDone = (run: Run) =>
   Object.values((run.details?.steps as Record<string, string> | undefined) ?? {}).includes("done");
 
 export function isPartial(run: Run | null): boolean {
+  if (run?.status === "partially_completed") return true;
   return !!run && ["blocked", "stopped", "rejected"].includes(run.status) && stepsDone(run);
 }
 
@@ -56,6 +57,8 @@ export function deriveState(run: Run | null): UiState {
   if (!run) return "IDLE";
   switch (run.status) {
     case "completed": return "COMPLETED";
+    case "partially_completed": return "PARTIALLY_COMPLETED";
+    case "failed": return "FAILED";
     case "awaiting_approval": return "WAITING_FOR_APPROVAL";
     case "paused":
     case "interrupted": return "PAUSED";
@@ -64,6 +67,8 @@ export function deriveState(run: Run | null): UiState {
     case "rejected": return isPartial(run) ? "PARTIALLY_COMPLETED" : "FAILED";
   }
   const last = lastEvent(run);
+  // The approval is recorded a moment before the run's status flips; don't show EXECUTING in that gap.
+  if (run.pending_approval) return "WAITING_FOR_APPROVAL";
   if (!run.events.some((e) => e.type === "PLAN")) return "PLANNING";
   if (last && RECOVERY_EVENTS.has(last.type)) return "RECOVERING";
   if (last?.type === "VERIFICATION") return "VERIFYING";
@@ -82,10 +87,52 @@ export interface Step {
 const isVerification = (e: RunEvent, field: string) =>
   e.type === "VERIFICATION" && e.data[field] !== undefined && e.data.passed === true;
 
+interface PlanTarget { id: string; name: string; slot: string | null }
+
+// Batch runs ("all shortlisted X candidates"): one step per candidate, then invitations and the final check.
+function deriveBatchSteps(run: Run, plan: RunEvent, state: UiState): Step[] {
+  const events = run.events;
+  const finished = !ACTIVE.includes(run.status);
+  const targets = (plan.data.targets as PlanTarget[] | undefined) ?? [];
+  const ids = (type: string) => new Set(events.filter((e) => e.type === type).map((e) => e.data.candidate_id));
+  const blocked = ids("TARGET_BLOCKED");
+  const done = ids("TARGET_DONE");
+  // Only the first unfinished step is live; later ones are pending (or failed once the run is over).
+  let liveTaken = false;
+  const open = (): StepState => {
+    if (finished) return "failed";
+    if (liveTaken) return "pending";
+    liveTaken = true;
+    return state === "WAITING_FOR_APPROVAL" ? "waiting" : state === "RECOVERING" ? "recovering" : "active";
+  };
+  const steps: Step[] = [
+    { key: "plan", label: "Find candidates and free slots", detail: `${targets.length} candidate(s) found`, state: "done" },
+  ];
+  for (const t of targets) {
+    steps.push({
+      key: t.id,
+      label: `Schedule ${t.name}`,
+      detail: t.slot ? `${t.slot.replace("T", " ")} · then status 'interview'` : "No free slot",
+      state: blocked.has(t.id) ? "failed" : done.has(t.id) ? "done" : open(),
+    });
+  }
+  const finalChecks = events.filter((e) => e.type === "VERIFICATION" && e.data.final);
+  if (/approval before each invitation/i.test(plan.message)) {
+    const sent = events.filter((e) => e.type === "VERIFICATION" && e.data.invitation_ids !== undefined && e.data.passed === true).length;
+    const owed = targets.length - blocked.size;
+    steps.push({ key: "invite", label: "Send invitations", detail: `${sent} of ${owed} sent, each after your approval`,
+      state: sent >= owed && owed > 0 ? "done" : finalChecks.length ? "failed" : open() });
+  }
+  steps.push({ key: "verify", label: "Independent verification", detail: "Compare the app's records with the goal",
+    state: finalChecks.length ? (finalChecks.every((e) => e.data.passed) ? "done" : "failed") : open() });
+  return steps;
+}
+
 export function deriveSteps(run: Run | null, state: UiState): Step[] {
   const events = run?.events ?? [];
   const finished = !!run && !ACTIVE.includes(run.status);
   const plan = events.find((e) => e.type === "PLAN");
+  if (run && plan?.data.batch) return deriveBatchSteps(run, plan, state);
   const withInvite = /invitation/i.test(plan?.message ?? "");
   const interviewVerified = events.some((e) => isVerification(e, "same_round_count"));
   const statusVerified = events.some((e) => isVerification(e, "expected"));

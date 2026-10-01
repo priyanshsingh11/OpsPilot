@@ -1,453 +1,389 @@
 # OpsPilot
 
-A computer-operator prototype: it receives a plain-English goal, operates
-applications on a real browser, and finishes the work with evidence.
+OpsPilot is a small **computer operator**. You give it a plain-English business goal; it
+operates a web application in a real Chromium browser, recovers from failures without
+duplicating work, asks for your approval before anything irreversible, and then **proves**
+what it did by checking the application's records and showing screenshots.
 
-OpsPilot is built as a Hulchul AI Engineering internship assignment. The idea is
-a system that takes a goal such as *"Schedule a Technical Screen for Aarav
-Sharma with Priya Nair on 2026-10-08 at 10:00"*, drives a synthetic
-recruitment portal in Chromium, and proves the work was done — recovering
-cleanly when the application fails along the way.
+Built for the Hulchul AI Engineering Internship build assignment.
+
+> **Scope, honestly:** OpsPilot does one workflow (interview scheduling) in one synthetic
+> application that ships with this repo. Goal understanding is rule-based, not an LLM.
+> See [Known limitations](#known-limitations).
 
 ---
 
-## Table of contents
+## Contents
 
-- [Overview](#overview)
+- [The problem](#the-problem)
+- [Example workflow](#example-workflow)
 - [Architecture](#architecture)
-- [Project layout](#project-layout)
-- [Prerequisites](#prerequisites)
-- [Setup](#setup)
-- [Running the system](#running-the-system)
-- [Components](#components)
-  - [Frontend — dashboard (port 3000)](#frontend--dashboard-port-3000)
-  - [Backend — API (port 8000)](#backend--api-port-8000)
-  - [Demo app — synthetic recruitment portal](#demo-app--synthetic-recruitment-portal)
-  - [Automation layer — Playwright](#automation-layer--playwright)
-  - [Agent — goal runner (Phase 5)](#agent--goal-runner-phase-5)
-- [API reference](#api-reference)
+- [Tech stack](#tech-stack)
+- [Install](#install)
+- [Run](#run)
+- [Using the agent](#using-the-agent)
+- [Failure simulation and the recovery demo](#failure-simulation-and-the-recovery-demo)
+- [How human approval works](#how-human-approval-works)
+- [How verification works](#how-verification-works)
 - [Testing](#testing)
 - [Configuration](#configuration)
-- [Demo failure scenarios](#demo-failure-scenarios)
-- [Design notes](#design-notes)
+- [Project layout](#project-layout)
+- [Known limitations](#known-limitations)
+- [What I personally built](#what-i-personally-built)
+- [AI and tool assistance](#ai-and-tool-assistance)
+- [Future improvements](#future-improvements)
+
+Recording the demo video: see **[DEMO.md](DEMO.md)**. Deeper design notes:
+**[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**; the short engineering note is **[docs/ENGINEERING_NOTE.md](docs/ENGINEERING_NOTE.md)**.
 
 ---
 
-## Overview
+## The problem
 
-OpsPilot is organised as a set of small, testable layers:
+Recruiting coordinators spend hours on clicks like *"book interviews for everyone we
+shortlisted for the AI Engineer role, tomorrow afternoon, and send them invites"*. Automating
+that with a script is easy until something goes wrong: the calendar times out, but did the
+booking go through? Retry blindly and the candidate gets two interviews and two emails.
 
-1. **A synthetic recruitment portal** (`demo-app/`) — a realistic web app with
-   jobs, candidates, interviews, and a controllable failure switch. This is the
-   "computer" the operator works on.
-2. **A browser automation layer** (`automation/`) — a Playwright tool
-   interface that opens the portal, performs actions, and returns structured
-   results. No business logic lives here.
-3. **An agent** (`backend/app/agent/`) — takes a plain-English goal, plans the
-   browser actions, and runs them with reliable failure recovery.
-4. **A dashboard** (`frontend/`) — shows live run progress, events, evidence
-   screenshots, and human controls (pause / continue / stop / approve).
+OpsPilot shows how an operator agent can do this kind of task **reliably**:
 
-The system is deliberately deterministic: the demo app seeds fixed data, every
-UI element carries a `data-testid`, and failures can be armed reproducibly, so
-the whole workflow can be tested end-to-end without any external services.
+- it reads the real state of the app before and after every action, so it never repeats work,
+- it stops for a human before sending an email to a candidate,
+- it never reports success it hasn't verified, and says exactly what is left when it can't finish.
 
----
+## Example workflow
+
+Goal typed into the dashboard:
+
+> Schedule interviews for all shortlisted AI Engineer candidates tomorrow afternoon.
+
+What OpsPilot does, all through the browser:
+
+1. Opens the AI Engineer job, filters candidates to **shortlisted**, and finds Aarav Sharma and Diya Patel.
+2. Reads the interview calendar: the hiring manager (Priya Nair) is already busy 14:00–15:00,
+   so it plans 13:00 and 15:00.
+3. For each candidate: checks they don't already have this interview, fills and submits the
+   *Schedule interview* form, confirms the record, moves the candidate to status `interview`.
+4. Shows you each invitation email (to, subject, message) and **waits for your approval** before sending it.
+5. Runs an independent verification against the app's records and captures a final screenshot.
+
+Result: **COMPLETED**, with 7 passing checks (records exist, statuses updated, invitations
+sent, no duplicates, required fields present, no double-booking, nothing outside the goal changed).
+
+The same code handles a variation such as *"Schedule 45-minute interviews for shortlisted Full
+Stack Engineer candidates on Friday."* (different role, duration, day and hiring manager).
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                         Dashboard (frontend)                       │
-│   goal input · live events · evidence screenshots · controls      │
-└───────────────────────────────┬──────────────────────────────────┘
-                                │ HTTP (JSON)
-┌───────────────────────────────▼──────────────────────────────────┐
-│                     Backend (FastAPI, port 8000)                   │
-│   /api/runs · /api/scenarios · /api/health · /screenshots          │
-│                                                                    │
-│   ┌────────────────────────────────────────────────────────────┐  │
-│   │ Agent (backend/app/agent/)                                  │  │
-│   │  goal → plan → act → verify, with failure recovery           │  │
-│   └───────────────────────────┬────────────────────────────────┘  │
-└───────────────────────────────┼──────────────────────────────────┘
-                                │ Playwright (Chromium)
-┌───────────────────────────────▼──────────────────────────────────┐
-│              Automation layer (automation/)                        │
-│   open_jobs · filter_candidates · create_interview · verify …     │
-│   every action → ActionResult{ success, data, error, screenshot } │
-└───────────────────────────────┬──────────────────────────────────┘
-                                │ drives
-┌───────────────────────────────▼──────────────────────────────────┐
-│           Demo app — synthetic recruitment portal                  │
-│   jobs · candidates · interviews · status updates                 │
-│   failure switch: chaos mode / before_write / after_write         │
-└──────────────────────────────────────────────────────────────────┘
+ Dashboard (Next.js, :3000)        goal · live status · timeline · approval · verification · evidence
+        │  HTTP/JSON (polling)
+        ▼
+ Backend API (FastAPI, :8000)      runs, pause/continue/stop/resume, approvals, /screenshots
+        │
+        ├── Agent (backend/app/agent)          parse goal → plan → act with recovery → ask approval
+        │       │                              (one background thread + one Chromium per run)
+        │       ▼
+        │   Automation layer (automation/)     Playwright: open_jobs, filter_candidates,
+        │       │                              create_interview, send_invitation, … → ActionResult
+        │       ▼
+        │   Demo recruitment app (demo-app/app, :5050)   jobs · candidates · interviews · invitations
+        │                                                + deterministic failure injection
+        │
+        ├── Verification (backend/app/verification.py)   reads /api/state before vs after; decides
+        │                                                COMPLETED / PARTIALLY_COMPLETED / FAILED
+        └── SQLite (backend/opspilot.db)       runs, event log, checkpoints, approvals
 ```
 
----
+Key separation:
+
+- **The agent acts only through the browser.** Every read and write the goal needs goes
+  through Playwright on the app's real pages.
+- **Verification is separate from execution.** It ignores what the agent claims; it compares the
+  app's records before and after the run (via the demo app's read-only `/api/state`).
+- **The demo harness is separate too.** Resetting data and arming failures use admin endpoints
+  and are logged as `SETUP` events, never as agent actions.
+
+More detail (run lifecycle, recovery rule, approval gate, data model): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Tech stack
+
+| Part | Technology |
+|---|---|
+| Dashboard | Next.js 16, React 19, TypeScript, CSS modules |
+| Backend API | Python 3.11+, FastAPI, Pydantic Settings, SQLAlchemy 2 + SQLite |
+| Browser automation | Playwright (Chromium, sync API) |
+| Demo application | FastAPI + Jinja2 server-rendered pages, in-memory data |
+| Tests | pytest (real browser, real servers), ESLint + `tsc` for the frontend |
+
+No external services, API keys or accounts are required.
+
+## Install
+
+Requires **Python 3.11+** (tested with 3.12 and 3.14) and **Node 20+**. Commands are run from the repo root.
+
+```bash
+cp .env.example .env
+cp frontend/.env.example frontend/.env.local
+
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/playwright install chromium
+
+cd frontend && npm install && cd ..
+```
+
+## Run
+
+Three processes, each in its own terminal, from the repo root:
+
+```bash
+# 1. The synthetic recruitment app (http://127.0.0.1:5050)
+cd demo-app && ../.venv/bin/uvicorn app.main:app --port 5050
+```
+
+```bash
+# 2. Backend API + agent (http://127.0.0.1:8000, API docs at /docs)
+cd backend && ../.venv/bin/uvicorn app.main:app --port 8000
+```
+
+```bash
+# 3. Dashboard (http://localhost:3000)
+cd frontend && npm run dev
+```
+
+Check it is up: `curl http://127.0.0.1:8000/api/health` returns `"status":"ok"`, and the
+dashboard header shows **Backend ok**.
+
+To **watch the browser** while the agent works, set `AGENT_HEADLESS=false` in `.env` and
+restart the backend.
+
+The demo app keeps its data in memory: restarting it, or ticking **Reset demo data first**
+in the dashboard, restores the seed data (6 jobs, 5 of them open; 12 candidates; 1 existing interview on the next business day).
+You can browse it directly at http://127.0.0.1:5050/jobs.
+
+## Using the agent
+
+Open http://localhost:3000, type a goal, pick a failure scenario (or *Normal run*), keep
+**Reset demo data first** ticked for repeatable results, and press **Run agent**.
+
+Goals it understands (the candidate, job and interviewer names are read from the app at run time):
+
+| Kind | Example |
+|---|---|
+| Batch | `Schedule interviews for all shortlisted AI Engineer candidates tomorrow afternoon.` |
+| Batch, variation | `Schedule 45-minute interviews for shortlisted Full Stack Engineer candidates on Friday.` |
+| Batch, explicit | `Book technical screens for shortlisted Backend Engineer candidates with Rahul Verma on 2026-10-09 starting at 2pm` |
+| Single | `Schedule a Technical Screen for Aarav Sharma with Priya Nair on 2026-10-08 at 10:00` |
+| Opt out of emails | add `without sending an invitation` |
+
+What is understood: a job title, a pipeline status (`shortlisted`, `applied`, …), a round name,
+an interviewer (default: the job's hiring manager), a date (`YYYY-MM-DD`, `October 9`,
+`tomorrow`, a weekday name; default: next business day; `today`/`tomorrow` falling on a weekend moves to Monday), a time or part of day (`at 3pm`,
+`starting at 2pm`, `morning`, `afternoon`; default 10:00–18:00) and a duration (`45-minute`,
+`an hour`; default 60). Every default it applies is listed in the plan. A goal it cannot
+understand is refused with the reason, and nothing is changed.
+
+You can also drive it over HTTP: `POST /api/runs {"goal": "...", "scenario": "none", "reset_demo_data": true}`,
+then poll `GET /api/runs/{id}`. All endpoints are listed at http://127.0.0.1:8000/docs.
+
+## Failure simulation and the recovery demo
+
+The demo app can make interview creation fail on purpose. The dashboard's **Failure scenario**
+picker arms it right before the run, so every take behaves the same:
+
+| Scenario | What the app does | What OpsPilot does | Final status |
+|---|---|---|---|
+| Normal run | nothing | — | COMPLETED |
+| Calendar fails once | 1st create fails, **nothing saved** | checks the page → not there → retries once | COMPLETED |
+| Saved, but reported as failed | 1st create **is saved** but returns HTTP 500 | checks the page → it exists → **does not retry** (no duplicate) | COMPLETED |
+| Outage for one candidate | next 3 creates fail | 1st candidate gives up after 3 attempts, others go through | PARTIALLY_COMPLETED |
+| Calendar outage | next 10 creates fail | every candidate gives up after 3 attempts | FAILED |
+
+**Reproducing the recovery demo:** goal *"Schedule interviews for all shortlisted AI Engineer
+candidates tomorrow afternoon."*, scenario **Saved, but reported as failed**, Reset ticked,
+Run. In the timeline you will see `ACTION_FAILED` → `STATE_CHECK [post-failure] … already
+exists` → `RECOVERY_STARTED … NOT retrying`, then the run continues; the **Failure and
+recovery** panel shows the decision and the final verification shows *No duplicate interviews
+or invitations: PASS*. Step-by-step script: [DEMO.md](DEMO.md).
+
+The recovery rule, in short: after any failed action the agent re-reads the app before deciding.
+
+| After a failure, the page shows… | Decision |
+|---|---|
+| the interview exists | don't retry; treat as done and verify |
+| nothing, and the error is transient (500, timeout) | retry, up to `AGENT_MAX_ATTEMPTS` in total, with backoff |
+| nothing, and the error is permanent (validation) | stop for this candidate with the reason |
+| the page can't be read | stop; the outcome is unknown and a retry could duplicate |
+
+Other ways to arm failures (for experiments): `POST /admin/failure` on the demo app
+(`remaining`, `mode=before_write|after_write`), the chaos-mode toggle on its `/interviews`
+page, or shell variables when starting it:
+`DEMO_FAILING_ATTEMPTS=1 DEMO_FAILURE_MODE=after_write ../.venv/bin/uvicorn app.main:app --port 5050`.
+
+## How human approval works
+
+Scheduling an interview and changing a status are routine and reversible in the app, so the
+agent does them on its own. **Sending an invitation email to a candidate cannot be undone**, so
+every send needs your approval:
+
+1. When it reaches the send step, the run switches to **WAITING_FOR_APPROVAL**. The Approval panel
+   shows the recipient, the exact subject and message, and what approve and reject will each do.
+2. **Approve and send**: the agent sends exactly that email, then confirms the app recorded one invitation with that content.
+3. **Reject**: nothing is sent; the run continues with the other candidates and ends
+   **PARTIALLY_COMPLETED**, listing the unsent invitation under *What remains*.
+
+The gate is enforced in code, not only in the UI: the only way to send is
+`BrowserDriver.send_invitation(grant, payload)`, and a grant exists only after the approval is
+read back from the database as `approved` for that exact email (its hash). It is re-checked at
+the moment of sending, so a stop, a reject, or a changed email invalidates it.
+
+Other controls on the dashboard: **Pause** (takes effect at the next step boundary; an action
+already in the browser finishes first), **Continue**, **Stop** (ends the run and reports what
+was done), and **Resume** for a run interrupted by a backend restart (it re-checks the app's
+state, so finished work is not repeated). To skip invitations entirely, add *"without sending
+an invitation"* to the goal.
+
+## How verification works
+
+`backend/app/verification.py` runs at the end of every batch run and is deliberately independent
+of the agent: it takes the app's records **before** the run and **after** it and compares them
+with what the goal asked for.
+
+| Check | Passes when |
+|---|---|
+| Interview records exist | every target candidate has exactly one matching interview (round, time, duration, interviewer) |
+| Candidate statuses updated | every target candidate has status `interview` |
+| Invitations sent | every approved invitation is recorded as sent |
+| No duplicate interviews or invitations | no candidate has the same round twice or two invitations for one interview |
+| All required fields present | round, time, duration, interviewer and job are set on every new interview |
+| No interviewer double-booked | no overlapping interviews for the interviewers involved |
+| No unintended changes | no other candidate's status, interview or invitation changed |
+
+The final status comes from these checks, not from the agent:
+
+- **COMPLETED**: every candidate is fully done and every check passes.
+- **PARTIALLY_COMPLETED**: some candidates are done (or all are, but a safety check failed).
+- **FAILED**: none could be completed.
+
+Anything incomplete is listed under **What remains** with the reason and whether it is safe to
+re-run. Re-running is always safe: the agent finds what already exists and creates nothing twice.
+
+Evidence: Playwright saves a screenshot after every browser action (with `-ok` / `-fail` in the
+name), and the verifier captures the final interview calendar. The dashboard's **Evidence**
+panel shows them; the files are in `screenshots/`. Every run is also stored in SQLite with its
+full event log and an action ledger (input, result, error, recovery link and screenshots per action)
+in `details.actions`, available from `GET /api/runs/{id}`.
+
+Single-candidate goals use the same per-step confirmations (exactly one matching interview,
+the status, the approved invitation), but not the before/after verifier.
+
+## Testing
+
+All tests start their own demo-app server on port 5065 and drive headless Chromium; nothing is mocked except where noted.
+
+```bash
+cd backend && ../.venv/bin/python -m pytest -q     # 49 tests: agent, recovery, approval, end-to-end
+cd .. && .venv/bin/python -m pytest -q automation/tests   # 4 tests: the Playwright layer
+.venv/bin/python -m pytest -q demo-app/tests              # 9 tests: the demo app on its own (fast, no browser)
+cd frontend && npx tsc --noEmit && npm run lint    # frontend type check and lint
+```
+
+Run one pytest session at a time (they share port 5065).
+
+What the end-to-end suite (`backend/tests/test_end_to_end.py`) proves through the real API:
+
+1. **Normal run**: candidates found in the UI, interviews tomorrow afternoon around an existing booking, statuses updated, two approvals that each resume the run, all checks pass, evidence screenshot exists.
+2. **Variation**: Full Stack Engineer, 45-minute slots back to back on Friday, different hiring manager, the `applied` candidate left alone.
+3. **Failure**: saved-but-failed is detected by a state check and not retried (no duplicate); a transient failure is retried once.
+4. **Pause**: nothing changes while paused; continue finishes with no duplicates.
+5. **Unrecoverable failure**: PARTIALLY_COMPLETED (one candidate blocked) or FAILED (all blocked), never COMPLETED, with the reason per candidate.
+
+Plus re-running a finished goal (does nothing), rejecting one invitation (PARTIALLY_COMPLETED), and rejecting every
+invitation (PARTIALLY_COMPLETED: the interviews and statuses are real, only the emails were withheld).
+`test_recovery_unit.py` uses in-memory fakes for the cases the demo app can't produce
+(unreadable page after a failure, permanent error).
+
+## Configuration
+
+`.env` (copied from `.env.example`) configures the backend:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DEMO_APP_URL` | `http://127.0.0.1:5050` | The demo app the agent operates |
+| `AGENT_HEADLESS` | `true` | `false` opens a visible Chromium window |
+| `AGENT_MAX_ATTEMPTS` | `3` | Attempts for a failing action |
+| `AGENT_RETRY_BACKOFF_SECONDS` | `1.0` | Wait between attempts (grows linearly) |
+| `AGENT_STEP_DELAY_SECONDS` | `0.3` | Pause after each logged step, so runs are watchable |
+| `DATABASE_URL` | `backend/opspilot.db` | SQLite file for runs and approvals |
+| `CORS_ORIGINS` | `http://localhost:3000,…` | Origins allowed to call the API |
+
+`frontend/.env.local` sets `NEXT_PUBLIC_API_URL` (default `http://localhost:8000`).
 
 ## Project layout
 
 ```
-.
-├── backend/                     # FastAPI backend + agent (port 8000)
-│   ├── app/
-│   │   ├── main.py              # API routes, lifespan, screenshot mount
-│   │   ├── config.py            # Settings (env-driven)
-│   │   ├── database.py          # SQLite engine, init/health
-│   │   ├── models.py            # SQLAlchemy tables (runs, events, approvals)
-│   │   └── agent/               # Phase 5 goal runner
-│   │       ├── manager.py       # Run lifecycle, pause/continue/stop/resume
-│   │       ├── runner.py        # goal → plan → act → verify loop
-│   │       ├── driver.py        # BrowserDriver + HarnessClient (Playwright)
-│   │       ├── planning.py      # goal → structured plan
-│   │       ├── scheduling.py    # interview scheduling + recovery rule
-│   │       ├── scenarios.py     # reproducible failure scenarios
-│   │       ├── events.py        # structured run events (JSON log)
-│   │       ├── control.py       # RunControl state machine
-│   │       ├── evidence.py      # screenshot/evidence capture
-│   │       ├── goal.py          # goal parsing/validation
-│   │       ├── store.py         # RunStore (persistence)
-│   │       └── invitation.py    # approval prompts
-│   ├── tests/                   # backend + agent tests
-│   └── requirements.txt
-│
-├── frontend/                    # Next.js dashboard (port 3000)
-│   ├── app/                     # page.tsx, layout.tsx, globals.css
-│   ├── lib/                     # api.ts (client), runState.ts
-│   └── public/
-│
-├── demo-app/                    # Synthetic recruitment portal
-│   ├── app/                     # in-memory variant (Phase 3 target)
-│   │   ├── main.py              # routes: jobs, candidates, interviews, admin
-│   │   ├── models.py            # Job/Candidate/Interview + seed data
-│   │   └── store.py             # in-memory store + failure simulation
-│   ├── main.py                  # SQLite-backed variant ("TalentDesk", port 5001)
-│   ├── db.py                    # SQLite schema, seed, failure plan
-│   ├── templates/               # Jinja2 templates (all carry data-testid)
-│   ├── static/style.css
-│   ├── tests/test_demo_app.py
-│   └── alt-simple-app/          # minimal single-file variant
-│
-├── automation/                  # Playwright browser automation layer
-│   ├── browser.py               # Chromium session + screenshots
-│   ├── actions.py               # RecruitmentBrowser tool interface
-│   ├── results.py               # ActionResult / ActionError / domain types
-│   ├── errors.py                # exception → structured error
-│   └── tests/
-│       ├── conftest.py          # boots demo app + browser fixtures
-│       └── test_workflow.py     # end-to-end workflow + failure tests
-│
-├── screenshots/                 # captured evidence (gitignored)
-├── .env.example                 # backend + agent + demo config
-└── README.md
+backend/
+  app/main.py            API: runs, controls, approvals, /screenshots
+  app/verification.py    independent before/after verification → final status
+  app/agent/
+    runner.py            goal → plan → act → verify; batch and single-candidate flows
+    goal.py              rule-based goal parser (batch + single)
+    planning.py          free-slot finding around existing bookings
+    scheduling.py        interview creation with state-aware recovery
+    invitation.py        approval-gated invitation email
+    control.py           pause / stop / approval gate (ApprovalGrant)
+    manager.py, store.py run lifecycle and persistence
+    driver.py            BrowserDriver (Playwright) + HarnessClient (admin, /api/state)
+    evidence.py          action ledger
+    events.py            structured event log (also one JSON line per event in the server log)
+    scenarios.py         reproducible failure scenarios
+  tests/                 pytest suites (see Testing)
+automation/              Playwright layer: RecruitmentBrowser → ActionResult (+ its own tests)
+demo-app/app/            the synthetic recruitment app the agent operates
+frontend/                Next.js dashboard (app/page.tsx, app/panels.tsx, lib/)
+screenshots/             evidence written at run time (git-ignored)
 ```
 
----
-
-## Prerequisites
-
-- **Python 3.11+**
-- **Node 20+**
-- **Playwright Chromium** — installed once via:
-  ```bash
-  .venv/bin/playwright install chromium
-  ```
-
----
-
-## Setup
-
-```bash
-# 1. Environment files
-cp .env.example .env
-cp frontend/.env.example frontend/.env.local
-
-# 2. Python dependencies (backend + demo app + automation)
-python3 -m venv .venv
-.venv/bin/pip install -r backend/requirements.txt
-.venv/bin/playwright install chromium
-
-# 3. Frontend dependencies
-cd frontend && npm install && cd ..
-```
-
----
-
-## Running the system
-
-The system runs as three processes. From the repo root:
-
-```bash
-# Terminal 1 — demo app (synthetic recruitment portal)
-#   in-memory variant on 5050 (used by the agent and Phase 5)
-cd demo-app && ../.venv/bin/uvicorn app.main:app --port 5050
-
-# Terminal 2 — backend API + agent (port 8000)
-cd backend && ../.venv/bin/uvicorn app.main:app --port 8000
-
-# Terminal 3 — dashboard (port 3000)
-cd frontend && npm run dev
-```
-
-Then open **http://localhost:3000**, type a goal, and run it.
-
-> **Note on ports:** macOS AirPlay Receiver holds port 5000, so the demo app
-> defaults to **5050**. The SQLite-backed "TalentDesk" variant
-> (`demo-app/main.py`) runs on **5001** if you prefer persistent data:
-> ```bash
-> .venv/bin/uvicorn main:app --app-dir demo-app --port 5001
-> ```
-
-To watch Chromium drive the app instead of running headless, set
-`AGENT_HEADLESS=false` in `.env`.
-
----
-
-## Components
-
-### Frontend — dashboard (port 3000)
-
-Next.js app that talks to the backend API. It provides:
-
-- **Goal input** — a plain-English goal, plus a failure-scenario picker and a
-  "reset demo data first" toggle.
-- **Live execution status** — current step, run state.
-- **Activity timeline** — structured events as they happen
-  (`GOAL_RECEIVED`, `PLAN`, `ACTION`, `ACTION_FAILED`, `RECOVERY_STARTED`,
-  `RETRY`, `VERIFICATION`, `COMPLETED`, `BLOCKED`, …).
-- **Evidence** — screenshots the browser captured, served from `/screenshots`.
-- **Human controls** — pause, continue, stop, resume, and approve/reject when
-  the agent asks for approval.
-
-### Backend — API (port 8000)
-
-FastAPI app that owns run lifecycle and persistence. See
-[API reference](#api-reference) for endpoints. Key behaviours:
-
-- Runs execute in the background; their full event log is persisted to SQLite
-  as it happens.
-- A run interrupted by a process restart is marked **interrupted** and can be
-  **resumed** — the agent re-checks the app's real state at every step, so
-  resuming never repeats work.
-- Only one run at a time (two runs would make each other's state checks
-  meaningless).
-
-### Demo app — synthetic recruitment portal
-
-The controlled web app OpsPilot operates. Two variants exist:
-
-| Variant | Entry point | Data | Port | Used by |
-|---|---|---|---|---|
-| In-memory | `demo-app/app/main.py` | re-seeded on start | 5050 | Phase 3 tests, Phase 5 agent |
-| SQLite ("TalentDesk") | `demo-app/main.py` | persistent SQLite | 5001 | alternative / persistent |
-
-Both expose the same pages and the same failure switches. All UI elements
-carry `data-testid` attributes for stable automation.
-
-**Pages:**
-
-| Route | Purpose |
-|---|---|
-| `/jobs` | List all jobs |
-| `/jobs/{id}?status=` | Job detail + candidates (filter by status / search) |
-| `/candidates/{id}` | Candidate profile, status form, interviews |
-| `/candidates/{id}/interviews/new` | Schedule-interview form |
-| `/interviews` | Interview calendar + failure controls |
-| `/admin` | Failure-plan toggle + reset |
-| `/api/state` | Read-only JSON snapshot (for verification code) |
-
-**Failure simulation** — the portal can be told to fail interview creation:
-
-- **Chaos mode** — every create fails with a 500 until switched off.
-- **Failure plan** — the next *N* creates fail, in one of two modes:
-  - `before_write` — nothing is saved, a 500 is returned.
-  - `after_write` — the interview **is saved**, but a 500 is still returned
-    (like a calendar sync timing out after commit). A blind retry would
-    create a duplicate.
-
-The plan can be armed from the dashboard, via `POST /admin/failure`, or with the
-`DEMO_FAILING_ATTEMPTS` / `DEMO_FAILURE_MODE` environment variables.
-
-### Automation layer — Playwright
-
-`automation/` is a thin, reliable tool interface over the demo app. It launches
-Chromium, performs UI actions, and returns structured results. **It contains no
-business logic** — it only interacts with the UI and returns data, so the agent
-(or tests) decide what to do next.
-
-```python
-from automation import RecruitmentBrowser
-
-with RecruitmentBrowser(base_url="http://127.0.0.1:5050") as browser:
-    jobs       = browser.open_jobs()                        # list jobs
-    job        = browser.select_job(title="AI Engineer")    # open a job
-    candidates = browser.filter_candidates(job_id=job.data.id, status="shortlisted")
-    candidate  = browser.get_candidate(candidate_id=candidates.data[0].id)
-    interview  = browser.create_interview(
-        candidate_id=candidate.data.id,
-        round_name="Technical Screen",
-        scheduled_at="2026-10-10T10:00",
-        interviewer="Priya Nair",
-    )
-    status     = browser.update_candidate_status(candidate_id=candidate.data.id, status="interview")
-    verified   = browser.verify_interview(candidate_id=candidate.data.id, round_name="Technical Screen")
-```
-
-**Every action returns the same shape:**
-
-```python
-ActionResult(
-    action="create_interview",
-    success=True,                    # or False
-    data=InterviewDetails(...),      # typed domain data on success
-    error=ActionError(               # structured failure info on failure
-        type="server_error",         # timeout | not_found | server_error | validation | ...
-        message="...",
-        page_url="...",
-        details={"status_code": "500"},
-    ),
-    screenshot="screenshots/….png",  # evidence captured around the action
-    duration_ms=812.3,
-)
-```
-
-Screenshots are written to `screenshots/` after every action, labelled with the
-action name and outcome (`-ok` / `-fail`).
-
-### Agent — goal runner (Phase 5)
-
-`backend/app/agent/` takes a plain-English goal and runs it through the
-automation layer with **reliable failure recovery**.
-
-Given:
-
-> Schedule a Technical Screen for Aarav Sharma with Priya Nair on 2026-10-08 at 10:00
-
-the agent parses the goal into a plan, then executes: find the candidate →
-schedule the interview → move the candidate to `interview` status → verify.
-
-**Recovery rule:** a failed create is never retried blindly. The agent re-opens
-the candidate page (or reads `/api/state`) to see what actually happened:
-
-| What the state check finds | Decision |
-|---|---|
-| The interview exists (the failed request saved it) | Don't retry. Verify, then continue |
-| It doesn't exist, error is transient (500/timeout) | Retry (bounded, with backoff), then verify |
-| It doesn't exist, error is permanent (validation) | Stop with a concrete blocker |
-| The page can't be read | Stop — outcome unknown, a retry could duplicate |
-| The same round is already booked with different details | Stop — needs approval |
-
-The same check runs **before** the first attempt, so re-running a finished goal
-creates nothing. Verification reads `/api/state` (independent of the browser)
-and requires exactly one matching interview.
-
----
-
-## API reference
-
-Base URL: `http://localhost:8000`
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/health` | Service + database health |
-| `GET` | `/api/scenarios` | Available failure scenarios |
-| `POST` | `/api/runs` | Start a run — `{goal, scenario?, reset_demo_data?}` (202) |
-| `GET` | `/api/runs` | Recent runs |
-| `GET` | `/api/runs/{id}` | Run detail + live events |
-| `POST` | `/api/runs/{id}/pause` | Pause a running run |
-| `POST` | `/api/runs/{id}/continue` | Continue a paused run |
-| `POST` | `/api/runs/{id}/stop` | Stop a run |
-| `POST` | `/api/runs/{id}/resume` | Resume an interrupted run (202) |
-| `POST` | `/api/runs/{id}/approvals/{aid}/approve` | Approve a pending approval |
-| `POST` | `/api/runs/{id}/approvals/{aid}/reject` | Reject a pending approval |
-| `GET` | `/screenshots/{path}` | Evidence screenshots captured by the browser |
-
-Interactive docs: **http://localhost:8000/docs**
-
----
-
-## Testing
-
-All tests are deterministic — they boot their own demo app instance and run
-headless Chromium.
-
-```bash
-# Backend + agent tests (boots demo app + headless Chromium)
-cd backend && ../.venv/bin/python -m pytest -q
-
-# Automation layer workflow tests (boots its own demo app instance)
-.venv/bin/python -m pytest automation/tests/ -v
-
-# Demo app tests
-.venv/bin/python -m pytest demo-app/tests -q
-```
-
-The automation tests prove the layer can deterministically:
-
-1. Find shortlisted AI Engineer candidates,
-2. Create an interview for one candidate,
-3. Update the candidate status,
-4. Verify the interview exists,
-
-and that it detects a simulated outage, exposes structured error information,
-and recovers on retry — including the `after_write` case where a blind retry
-would duplicate the interview.
-
----
-
-## Configuration
-
-Configuration is env-driven. Copy `.env.example` to `.env` and adjust.
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `ENVIRONMENT` | `development` | Environment label |
-| `BACKEND_HOST` / `BACKEND_PORT` | `127.0.0.1` / `8000` | Backend bind address |
-| `DATABASE_URL` | `sqlite:///./backend/opspilot.db` | Backend SQLite location |
-| `CORS_ORIGINS` | `http://localhost:3000,…` | Allowed browser origins |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | Frontend API base (in `frontend/.env.local`) |
-| `DEMO_APP_URL` | `http://127.0.0.1:5050` | Demo app the agent operates |
-| `AGENT_HEADLESS` | `true` | `false` to watch Chromium drive the app |
-| `AGENT_MAX_ATTEMPTS` | `3` | Max create attempts before blocking |
-| `AGENT_RETRY_BACKOFF_SECONDS` | `1.0` | Backoff between retries |
-| `AGENT_STEP_DELAY_SECONDS` | `0.3` | Delay between browser steps |
-| `DEMO_FAILING_ATTEMPTS` | `0` | Arm N failing interview creates on seed/reset |
-| `DEMO_FAILURE_MODE` | `before_write` | `before_write` or `after_write` |
-
----
-
-## Demo failure scenarios
-
-Pick a scenario in the dashboard (or arm it via `POST /admin/failure` /
-env vars). Each behaves the same way every time:
-
-| Scenario | Failure plan | Expected outcome |
-|---|---|---|
-| `none` | — | Completes in one attempt |
-| `transient` | 1 × `before_write` | Fails → state check finds nothing → retry → completes |
-| `saved_but_failed` | 1 × `after_write` | Fails, but the row was saved → state check finds it → **no retry, no duplicate** → completes |
-| `outage` | 10 × `before_write` | 3 attempts, each followed by a state check → **BLOCKED**, with "nothing was created, safe to re-run" |
-
-Keep **"Reset demo data first"** ticked so every take starts from the same
-seed data.
-
----
-
-## Design notes
-
-- **No business logic in the browser layer.** The Playwright functions only
-  navigate, click, fill, and extract data. All decisions (what to do on
-  failure, whether to retry, whether to ask the user) live in the agent.
-- **Structured results over strings.** Every action returns a typed
-  `ActionResult`; failures carry a machine-readable `type`, the page URL, and
-  extra details, so a future agent can reason about them without parsing text.
-- **Determinism first.** Fixed seed data, `data-testid` selectors, explicit
-  waits, and reproducible failure plans make the whole workflow testable
-  end-to-end without external services.
-- **Evidence by default.** Screenshots are captured after every action and
-  stored with the run, so the dashboard can show *what actually happened*, not
-  just what the agent claims happened.
-- **Human control.** Runs can be paused, continued, stopped, and resumed; the
-  agent asks for approval when an action exceeds its authority.
+## Known limitations
+
+- **One workflow, one app.** Only interview scheduling (plus status update and invitation) in the bundled synthetic app.
+- **No LLM and no LangGraph.** The agent is a plain Python pipeline (parse → plan → act → verify) with an explicit event log and checkpoint; there is no model call and no agent framework. The dashboard uses CSS modules, not Tailwind.
+- **Rule-based goal understanding.** Regular expressions, not an LLM. Phrasings outside the documented patterns are refused with a reason rather than guessed.
+- **Simple scheduling model.** Only the interviewer's calendar is considered: no candidate availability, time zones, or holidays. Relative dates that land on a weekend move to the next business day; an explicit date or weekday is taken as written, even on a weekend.
+- **Emails are not really sent.** The demo app records an invitation as "sent"; nothing leaves the machine.
+- **One run at a time**, and one approval per email (no bulk approve).
+- **Pause is between steps**, not mid-action: an action already in the browser finishes first.
+- **The before/after verifier covers batch goals only.** Single-candidate goals rely on per-step confirmations.
+- **Verification reads a demo-only endpoint** (`/api/state`). A real system would use the product's read API or re-read the UI.
+- **No authentication** on the dashboard, the API, or the demo app's `/admin/*` and `/api/state` endpoints (the harness uses them to reset data and arm failures). Everything binds to localhost and is meant for local use only.
+- **The demo app's data is in memory**: restarting it resets everything. Dates like "tomorrow" are relative to the day you run it.
+- **The dashboard polls** every 0.5 s instead of streaming.
+- **Screenshots are never cleaned up** (the `screenshots/` folder only grows).
+
+## What I personally built
+
+> ✏️ **To be completed by Priyansh before submitting.** Describe in your own words what you
+> designed, decided, wrote, reviewed and debugged yourself, for example: choice of the
+> recruiting workflow and the synthetic app, the phase plan, the recovery and approval rules,
+> what you changed after reviewing generated code, and what you tested by hand.
+
+## AI and tool assistance
+
+- **Claude Code (Anthropic)** was used heavily, across several parallel sessions, to generate and revise most
+  of the code, tests and documentation in this repository, phase by phase (foundation, demo app,
+  Playwright layer, failure recovery, human control, verification, end-to-end testing). Its output
+  was directed by phase specifications and reviewed by the author.
+- **Libraries:** FastAPI, Pydantic, SQLAlchemy, Jinja2, Playwright, pytest, Next.js and React. No
+  code was copied from other projects.
+- **No AI at run time.** OpsPilot itself makes no model calls; its behaviour is deterministic.
+
+## Future improvements
+
+- An LLM planner behind the same plan format (with the rule-based parser as a fallback), so more phrasings and workflows work.
+- Run the before/after verifier for single-candidate goals too, and show the action ledger as its own table in the dashboard.
+- Candidate availability and time zones in slot finding; reschedule and cancel flows (with approval).
+- One approval for a batch of emails, with per-email opt-out.
+- Server-sent events instead of polling; authentication and an audit trail of who approved what.
+- Point the same driver interface at a second real-world app (e.g. a calendar or ATS sandbox).
+- Screenshot retention policy and a per-run evidence bundle download.

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ candidate.name }} · Recruiting{% endblock %}
 {% block content %}
-<p class="muted"><a href="/jobs/{{ job.id }}">&larr; Back to {{ job.title }}</a></p>
+<p class="muted"><a href="/jobs/{{ job.id }}" data-testid="candidate-job-link">&larr; Back to <span data-testid="candidate-job-title">{{ job.title }}</span></a></p>
 
 <h1 data-testid="candidate-name">{{ candidate.name }}</h1>
 <p class="muted" data-testid="candidate-email">{{ candidate.email }}</p>
@@ -38,7 +38,7 @@
   <a class="button" data-testid="schedule-interview-link" href="/candidates/{{ candidate.id }}/interviews/new">Schedule interview</a>
   <table class="table" data-testid="interviews-table">
     <thead>
-      <tr><th>Round</th><th>Scheduled</th><th>Interviewer</th><th>Status</th></tr>
+      <tr><th>Round</th><th>Scheduled</th><th>Interviewer</th><th>Status</th><th>Duration</th></tr>
     </thead>
     <tbody>
       {% for i in interviews %}
@@ -47,9 +47,10 @@
         <td data-testid="interview-scheduled-{{ i.id }}">{{ i.scheduled_at }}</td>
         <td>{{ i.interviewer }}</td>
         <td><span class="pill pill-{{ i.status }}" data-testid="interview-status-{{ i.id }}">{{ i.status }}</span></td>
+        <td data-testid="interview-duration-{{ i.id }}">{{ i.duration_minutes }} min</td>
       </tr>
       {% else %}
-      <tr><td colspan="4" class="muted" data-testid="interviews-empty">No interviews yet.</td></tr>
+      <tr><td colspan="5" class="muted" data-testid="interviews-empty">No interviews yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

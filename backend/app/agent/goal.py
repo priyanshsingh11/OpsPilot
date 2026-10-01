@@ -16,6 +16,9 @@ from datetime import date, timedelta
 MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], start=1)}
 DEFAULT_ROUND = "Interview"
+DEFAULT_DURATION = 60
+WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+_DURATION = re.compile(r"\b(\d{2,3})\s*-?\s*(?:min|mins|minute|minutes)\b|\b(an|one|1|2|two)\s*-?\s*hours?\b", re.I)
 NAME = r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2}"
 
 
@@ -35,6 +38,7 @@ class InterviewGoal:
     scheduled_at: str  # YYYY-MM-DDTHH:MM, the format of the app's datetime-local field
     send_invitation: bool = True  # always asks for approval first; False if the goal opts out
     assumptions: list[str] = field(default_factory=list)
+    duration_minutes: int = DEFAULT_DURATION
 
 
 def _find_names(text: str, names: list[str]) -> list[str]:
@@ -50,6 +54,9 @@ def _parse_date(text: str, today: date) -> str | None:
         return (today + timedelta(days=1)).isoformat()
     if re.search(r"\btoday\b", low):
         return today.isoformat()
+    if m := re.search(r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", low):
+        ahead = (WEEKDAYS.index(m[1]) - today.weekday()) % 7 or 7  # the next one, never today
+        return (today + timedelta(days=ahead)).isoformat()
     month = r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?"
     for pat, d_idx, m_idx in ((rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+{month}(?:,?\s+(\d{{4}}))?", 1, 2),
                               (rf"\b{month}\s+(\d{{1,2}})(?:st|nd|rd|th)?(?:,?\s+(\d{{4}}))?", 2, 1)):
@@ -57,6 +64,24 @@ def _parse_date(text: str, today: date) -> str | None:
             year = int(m[3]) if m[3] else today.year
             return date(year, MONTHS[m[m_idx][:3]], int(m[d_idx])).isoformat()
     return None
+
+
+def _avoid_weekend(day: str, text: str, today: date, assumptions: list[str]) -> str:
+    """'today' / 'tomorrow' that land on a weekend move to the next business day (stated in the plan).
+    An explicit date or weekday name is taken as written."""
+    d = date.fromisoformat(day)
+    if d.weekday() < 5 or not re.search(r"\b(today|tomorrow)\b", text, re.I):
+        return day
+    moved = _next_business_day(d - timedelta(days=1))
+    assumptions.append(f"{d:%A} {day} is a weekend day; using the next business day, {moved:%A} {moved.isoformat()}.")
+    return moved.isoformat()
+
+
+def _next_business_day(today: date) -> date:
+    d = today + timedelta(days=1)
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    return d
 
 
 def _parse_time(text: str) -> str | None:
@@ -81,10 +106,19 @@ def _parse_round(text: str, candidate: str) -> str | None:
                   rf"{re.escape(candidate)}", text, re.I)
     if not m:
         return None
-    words = m[1].strip()
-    if words.lower() in ("interview", "an interview", "interviews"):
+    words = _DURATION.sub("", m[1]).strip()
+    if words.lower() in ("", "interview", "an interview", "interviews"):
         return None
     return " ".join(w if w.isupper() else w.capitalize() for w in words.split())
+
+
+def _parse_duration(text: str) -> int | None:
+    m = _DURATION.search(text)
+    if not m:
+        return None
+    if m[1]:
+        return int(m[1])
+    return 120 if m[2].lower() in ("2", "two") else 60
 
 
 _NO_INVITE = re.compile(r"\b(?:do not|don't|dont|without|skip|no)\s+(?:sending\s+|send\s+)?(?:an?\s+|the\s+|any\s+)?"
@@ -124,6 +158,7 @@ def parse_interview_goal(text: str, candidates: list[str], known_interviewers: l
         raise GoalError(problems)
 
     assumptions = []
+    day = _avoid_weekend(day, text, today, assumptions)
     round_name = _parse_round(text, found[0])
     if round_name is None:
         round_name = DEFAULT_ROUND
@@ -131,55 +166,61 @@ def parse_interview_goal(text: str, candidates: list[str], known_interviewers: l
     send = not _NO_INVITE.search(text)
     if send:
         assumptions.append("Sending the invitation is part of this goal; it needs your approval first.")
-    return InterviewGoal(found[0], round_name, interviewer, f"{day}T{start}", send, assumptions)
+    duration = _parse_duration(text)
+    if duration is None:
+        duration = DEFAULT_DURATION
+        assumptions.append(f"No duration given; using {DEFAULT_DURATION} minutes.")
+    return InterviewGoal(found[0], round_name, interviewer, f"{day}T{start}", send, assumptions, duration)
 
 
 # ---- batch goals ---------------------------------------------------------------
 
 PIPELINE_STATUSES = ["applied", "screening", "shortlisted", "interview", "offer"]
-DEFAULT_BATCH_START = "10:00"
+# Parts of the day a goal can name, as (first possible start, latest end).
+DAY_PARTS = {"morning": ("09:00", "12:00"), "afternoon": ("13:00", "17:00"), "evening": ("17:00", "19:00")}
+WORKDAY = ("10:00", "18:00")
 
 
 @dataclass
 class BatchInterviewGoal:
-    """'Schedule interviews for shortlisted AI Engineer candidates' and variations."""
+    """'Schedule interviews for all shortlisted AI Engineer candidates tomorrow afternoon' and variations."""
 
     job_title: str
     candidate_status: str
     round_name: str
     interviewer: str | None  # None -> the job's hiring manager
     date: str  # YYYY-MM-DD
-    start_time: str  # first slot; later slots follow hourly
+    window_start: str  # HH:MM, earliest slot start
+    window_end: str  # HH:MM, every interview must end by this time
+    duration_minutes: int
+    send_invitation: bool = True
     assumptions: list[str] = field(default_factory=list)
-
-
-def _next_business_day(today: date) -> date:
-    d = today + timedelta(days=1)
-    while d.weekday() >= 5:
-        d += timedelta(days=1)
-    return d
 
 
 def _parse_batch_round(text: str, status: str) -> str | None:
     m = re.search(rf"\b(?:schedule|book|set up|arrange)\s+(?:an?\s+|the\s+)?(.+?)\s+for\s+(?:all\s+)?(?:the\s+|our\s+)?"
                   rf"{status}\b", text, re.I)
-    if not m or m[1].lower() in ("interview", "interviews", "an interview"):
+    if not m:
         return None
-    words = m[1].split()
+    words = _DURATION.sub("", m[1]).split()
+    if not words or " ".join(words).lower() in ("interview", "interviews", "an interview"):
+        return None
     if words[-1].lower().endswith("s") and not words[-1].lower().endswith("ss"):
         words[-1] = words[-1][:-1]  # "technical screens" -> "technical screen"
     return " ".join(w if w.isupper() else w.capitalize() for w in words)
 
 
 def parse_batch_goal(text: str, job_titles: list[str], today: date | None = None) -> BatchInterviewGoal | None:
-    """Return a batch goal if the text targets a group of candidates, else None."""
+    """Return a batch goal if the text targets a group of candidates ('... shortlisted X candidates'), else None."""
     today = today or date.today()
     low = text.lower()
-    status = next((s for s in PIPELINE_STATUSES if re.search(rf"\b{s}\b", low)), None)
-    jobs = _find_names(text, job_titles)
-    if not status or not re.search(r"\bcandidates\b", low) or not re.search(
-            r"\b(schedule|book|set up|arrange)\b", low):
+    if not re.search(r"\b(schedule|book|set up|arrange)\b", low):
         return None
+    status = next((s for s in PIPELINE_STATUSES
+                   if re.search(rf"\b{s}\b[\w\s-]{{0,40}}?\bcandidates\b", low)), None)
+    if status is None:
+        return None
+    jobs = _find_names(text, job_titles)
     if len(jobs) != 1:
         raise GoalError([f"Name exactly one job ({', '.join(job_titles)})." if not jobs
                          else f"Goal names more than one job: {', '.join(jobs)}."])
@@ -200,8 +241,25 @@ def parse_batch_goal(text: str, job_titles: list[str], today: date | None = None
     if day is None:
         day = _next_business_day(today).isoformat()
         assumptions.append(f"No date given; using the next business day, {day}.")
+    day = _avoid_weekend(day, text, today, assumptions)
+    if date.fromisoformat(day) < today:
+        raise GoalError([f"The interview date {day} is in the past."])
+
+    part = next((p for p in DAY_PARTS if re.search(rf"\b{p}\b", low)), None)
     start = _parse_time(text)
-    if start is None:
-        start = DEFAULT_BATCH_START
-        assumptions.append(f"No start time given; first slot at {start}, then hourly.")
-    return BatchInterviewGoal(jobs[0], status, round_name, interviewer, day, start, assumptions)
+    if start is not None:
+        window = (start, DAY_PARTS[part][1] if part else WORKDAY[1])
+    elif part:
+        window = DAY_PARTS[part]
+    else:
+        window = WORKDAY
+        assumptions.append(f"No time given; using working hours {window[0]}-{window[1]}.")
+    duration = _parse_duration(text)
+    if duration is None:
+        duration = DEFAULT_DURATION
+        assumptions.append(f"No duration given; using {DEFAULT_DURATION} minutes.")
+    send = not _NO_INVITE.search(text)
+    if send:
+        assumptions.append("Sending each invitation is part of this goal; each one needs your approval first.")
+    return BatchInterviewGoal(jobs[0], status, round_name, interviewer, day, window[0], window[1], duration,
+                              send, assumptions)

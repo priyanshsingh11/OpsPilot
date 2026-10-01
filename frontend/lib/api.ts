@@ -25,7 +25,8 @@ export type EventType =
   | "GOAL_RECEIVED" | "PLAN" | "SETUP" | "STATE_CHECK" | "ACTION" | "ACTION_SUCCEEDED"
   | "ACTION_FAILED" | "RECOVERY_STARTED" | "RETRY" | "SKIPPED" | "VERIFICATION"
   | "COMPLETED" | "BLOCKED" | "APPROVAL_REQUESTED" | "APPROVAL_GRANTED" | "PAUSED"
-  | "RESUMED" | "RUN_RESTARTED" | "REJECTED" | "STOPPED";
+  | "RESUMED" | "RUN_RESTARTED" | "REJECTED" | "STOPPED"
+  | "TARGET_BLOCKED" | "TARGET_DONE" | "EVIDENCE" | "PARTIALLY_COMPLETED" | "FAILED";
 
 export interface RunEvent {
   seq: number;
@@ -37,7 +38,7 @@ export interface RunEvent {
 
 export type RunStatus =
   | "running" | "paused" | "awaiting_approval" | "interrupted"
-  | "completed" | "blocked" | "stopped" | "rejected";
+  | "completed" | "partially_completed" | "failed" | "blocked" | "stopped" | "rejected";
 
 // Statuses in which the agent thread is alive and the dashboard should keep polling.
 export const ACTIVE_STATUSES: RunStatus[] = ["running", "paused", "awaiting_approval"];

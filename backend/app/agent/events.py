@@ -38,7 +38,15 @@ RUN_RESTARTED = "RUN_RESTARTED"  # a run interrupted by a restart was picked up 
 REJECTED = "REJECTED"  # the user declined the approval; the run ends here
 STOPPED = "STOPPED"
 
-TERMINAL = {COMPLETED, BLOCKED, REJECTED, STOPPED}
+# Batch runs: one candidate could not be finished (the run continues with the others),
+# a screenshot captured as proof of the final state, and the verified end states.
+TARGET_BLOCKED = "TARGET_BLOCKED"
+TARGET_DONE = "TARGET_DONE"
+EVIDENCE = "EVIDENCE"
+PARTIALLY_COMPLETED = "PARTIALLY_COMPLETED"
+FAILED = "FAILED"
+
+TERMINAL = {COMPLETED, BLOCKED, REJECTED, STOPPED, PARTIALLY_COMPLETED, FAILED}
 
 
 class RunLog:

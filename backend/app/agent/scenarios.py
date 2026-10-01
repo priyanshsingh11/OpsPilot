@@ -8,6 +8,9 @@ fixed count and mode, so a run behaves the same way every time:
 - saved_but_failed: the first create saves the interview and still returns an error; a blind
                     retry would duplicate it, so the agent must detect it and not retry.
 - outage:           every create fails; the agent stops with a concrete blocker after N attempts.
+- partial_outage:   exactly 3 creates fail (one candidate's whole retry budget at the default
+                    AGENT_MAX_ATTEMPTS=3). In a batch the first candidate is blocked, the rest
+                    succeed, and the run must end PARTIALLY_COMPLETED, not COMPLETED.
 """
 
 from dataclasses import dataclass
@@ -32,4 +35,7 @@ SCENARIOS: dict[str, Scenario] = {s.key: s for s in [
              "the agent must find it and NOT create a duplicate.", 1, "after_write"),
     Scenario("outage", "Calendar outage",
              "Every create attempt fails; the agent stops with a concrete blocker.", 10, "before_write"),
+    Scenario("partial_outage", "Outage for one candidate",
+             "The next 3 create attempts fail (one candidate's full retry budget); in a batch the first "
+             "candidate is blocked and the others go through.", 3, "before_write"),
 ]}

@@ -99,6 +99,7 @@ class InterviewDetails:
     scheduled_at: str
     interviewer: str
     status: str
+    duration_minutes: int | None = None  # read from the page when shown
 
 
 @dataclass

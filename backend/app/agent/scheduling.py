@@ -32,10 +32,12 @@ class InterviewRequest:
     round_name: str
     scheduled_at: str  # YYYY-MM-DDTHH:MM
     interviewer: str
+    duration_minutes: int = 60
 
     def describe(self) -> str:
         when = datetime.fromisoformat(self.scheduled_at).strftime("%Y-%m-%d at %H:%M")
-        return f"'{self.round_name}' for {self.candidate_name} with {self.interviewer} on {when}"
+        return (f"{self.duration_minutes}-min '{self.round_name}' for {self.candidate_name} "
+                f"with {self.interviewer} on {when}")
 
 
 # Kept in the ledger records: what the browser saw on the candidate page.
@@ -72,8 +74,10 @@ def _same_round(row, req: InterviewRequest) -> bool:
 
 
 def _matches(row, req: InterviewRequest) -> bool:
+    duration = row.get("duration_minutes") if isinstance(row, dict) else getattr(row, "duration_minutes", None)
     return (_same_round(row, req) and _same_time(_field(row, "scheduled_at"), req.scheduled_at)
-            and _field(row, "interviewer").strip().lower() == req.interviewer.strip().lower())
+            and _field(row, "interviewer").strip().lower() == req.interviewer.strip().lower()
+            and (duration is None or int(duration) == req.duration_minutes))
 
 
 def _check_state(driver: BrowserDriver, log: ev.RunLog, req: InterviewRequest, phase: str):
@@ -179,7 +183,8 @@ def schedule_interview(driver: BrowserDriver, harness: HarnessClient, log: ev.Ru
             act = ledger.begin("create_interview", f"Retry: schedule {req.round_name} for {who}",
                                {**req_input, "attempt": attempt}, target=cid,
                                recovery={"recovers": failed_rec.id, "decision": "retry", "reason": retry_reason})
-        last = driver.submit_interview(cid, req.round_name, req.scheduled_at, req.interviewer)
+        last = driver.submit_interview(cid, req.round_name, req.scheduled_at, req.interviewer,
+                                       req.duration_minutes)
         if last.ok:
             log.emit(ev.ACTION_SUCCEEDED, f"App accepted the interview (attempt {attempt}).",
                      attempt=attempt, screenshot=last.screenshot)

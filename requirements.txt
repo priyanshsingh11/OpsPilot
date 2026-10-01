@@ -1,0 +1,4 @@
+# Everything Python needs: backend + agent, the demo recruitment app, the Playwright layer, and tests.
+# After installing, download the browser once:  .venv/bin/playwright install chromium
+-r backend/requirements.txt
+-r demo-app/requirements.txt

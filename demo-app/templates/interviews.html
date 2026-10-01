@@ -19,7 +19,7 @@
 
 <table class="table" data-testid="interviews-table">
   <thead>
-    <tr><th>Candidate</th><th>Job</th><th>Round</th><th>Scheduled</th><th>Interviewer</th><th>Status</th></tr>
+    <tr><th>Candidate</th><th>Job</th><th>Round</th><th>Scheduled</th><th>Interviewer</th><th>Status</th><th>Duration</th></tr>
   </thead>
   <tbody>
     {% for i in interviews %}
@@ -30,9 +30,10 @@
       <td>{{ i.scheduled_at }}</td>
       <td>{{ i.interviewer }}</td>
       <td><span class="pill pill-{{ i.status }}">{{ i.status }}</span></td>
+      <td>{{ i.duration_minutes }} min</td>
     </tr>
     {% else %}
-    <tr><td colspan="6" class="muted" data-testid="interviews-empty">No interviews scheduled.</td></tr>
+    <tr><td colspan="7" class="muted" data-testid="interviews-empty">No interviews scheduled.</td></tr>
     {% endfor %}
   </tbody>
 </table>

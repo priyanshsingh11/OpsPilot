@@ -94,6 +94,12 @@ export function ApprovalPanel({ run, busy, onDecide }: {
         <div className={`${styles.callout} ${styles.warn}`}>
           <strong>{d.title ?? "Approval required"}</strong>
           {d.action && <p>{d.action}</p>}
+          {d.candidates && d.candidates.length > 0 && (
+            <p className={styles.meta}>
+              <b>Affected candidate{d.candidates.length > 1 ? "s" : ""}:</b>{" "}
+              {d.candidates.map((c) => `${c.name} (${c.email})`).join(", ")}
+            </p>
+          )}
           {d.email && (
             <dl className={styles.email}>
               <div><dt>To</dt><dd>{d.email.to}</dd></div>
@@ -161,12 +167,29 @@ export function RecoveryPanel({ run }: { run: Run | null }) {
   );
 }
 
-// 8. Verification results.
+// 8. Verification results. The independent end-of-run checks (batch runs) come first;
+// below them, the executor's own confirmation after each step.
 export function VerificationPanel({ run }: { run: Run | null }) {
-  const checks = (run?.events ?? []).filter((e) => e.type === "VERIFICATION");
+  const all = (run?.events ?? []).filter((e) => e.type === "VERIFICATION");
+  const independent = all.filter((e) => e.data.final);
+  const checks = all.filter((e) => !e.data.final);
   return (
     <Panel n={8} title="Verification">
-      {checks.length === 0 ? (
+      {independent.length > 0 && (
+        <>
+          <p className={styles.meta}><b>Final verification</b> · the app&apos;s records before vs after the run</p>
+          <ul className={styles.checks}>
+            {independent.map((e) => (
+              <li key={e.seq} className={styles.check}>
+                <span className={`${styles.tag} ${e.data.passed ? styles.good : styles.bad}`}>{e.data.passed ? "✓ PASS" : "✕ FAIL"}</span>
+                <span>{e.message}</span>
+              </li>
+            ))}
+          </ul>
+          {checks.length > 0 && <p className={styles.meta}><b>Step confirmations</b> · checked right after each action</p>}
+        </>
+      )}
+      {all.length === 0 ? (
         <Empty>No checks yet. Results are read back from the app&apos;s own records.</Empty>
       ) : (
         <ul className={styles.checks}>
@@ -189,7 +212,11 @@ export function VerificationPanel({ run }: { run: Run | null }) {
 export function ResultPanel({ run, state }: { run: Run | null; state: UiState }) {
   const meta = STATE_META[state];
   const details = run?.details ?? {};
+  const remaining = Array.isArray(details.remaining) ? (details.remaining as string[]) : [];
   const rows: [string, string][] = [];
+  if (details.interview_ids && typeof details.interview_ids === "object")
+    rows.push(["Interviews created or confirmed", Object.values(details.interview_ids as Record<string, string>).join(", ") || "none"]);
+  if (Array.isArray(details.actions)) rows.push(["Actions recorded", String(details.actions.length)]);
   if (typeof details.interview_id === "string") rows.push(["Interview", details.interview_id]);
   if (typeof details.invitation === "string") rows.push(["Invitation", details.invitation.replace("_", " ")]);
   if (typeof details.attempts === "number") rows.push(["Attempts", String(details.attempts)]);
@@ -203,7 +230,19 @@ export function ResultPanel({ run, state }: { run: Run | null; state: UiState })
       ) : (
         <div className={`${styles.callout} ${styles[meta.tone]}`}>
           <strong>{meta.label}</strong>
-          {run.status === "completed" || run.status === "rejected" || run.status === "stopped" ? (
+          {remaining.length > 0 || run.details?.batch ? (
+            <>
+              <p>{run.summary}</p>
+              {remaining.length > 0 && (
+                <>
+                  <p><b>What remains:</b></p>
+                  <ul className={styles.remaining}>
+                    {remaining.map((r) => <li key={r}>{r}</li>)}
+                  </ul>
+                </>
+              )}
+            </>
+          ) : run.status === "completed" || run.status === "rejected" || run.status === "stopped" ? (
             <p>{run.summary}</p>
           ) : (
             <>
@@ -261,6 +300,7 @@ const TONE: Record<string, string> = {
   STATE_CHECK: "info", VERIFICATION: "info", ACTION_SUCCEEDED: "good", COMPLETED: "good",
   SKIPPED: "neutral", SETUP: "neutral", APPROVAL_REQUESTED: "warn", APPROVAL_GRANTED: "good",
   PAUSED: "warn", RESUMED: "info", RUN_RESTARTED: "warn", REJECTED: "warn", STOPPED: "neutral",
+  TARGET_BLOCKED: "bad", TARGET_DONE: "good", EVIDENCE: "neutral", PARTIALLY_COMPLETED: "warn", FAILED: "bad",
 };
 
 export function TimelinePanel({ run, starting }: { run: Run | null; starting: boolean }) {

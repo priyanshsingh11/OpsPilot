@@ -14,8 +14,7 @@ type BackendState =
   | { kind: "online"; health: HealthResponse }
   | { kind: "offline"; error: string };
 
-const EXAMPLE_GOAL =
-  "Schedule a Technical Screen for Aarav Sharma with Priya Nair on 2026-10-08 at 10:00";
+const EXAMPLE_GOAL = "Schedule interviews for all shortlisted AI Engineer candidates tomorrow afternoon.";
 
 export default function Dashboard() {
   const [goal, setGoal] = useState(EXAMPLE_GOAL);
@@ -112,7 +111,7 @@ export default function Dashboard() {
           rows={2}
           value={goal}
           onChange={(e) => setGoal(e.target.value)}
-          placeholder="Schedule a <round> for <candidate> with <interviewer> on <date> at <time>"
+          placeholder="e.g. Schedule 45-minute interviews for shortlisted Full Stack Engineer candidates on Friday."
         />
         <div className={styles.controls}>
           <div className={styles.field}>

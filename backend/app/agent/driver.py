@@ -48,6 +48,7 @@ class InterviewRow:
     scheduled_at: str
     interviewer: str
     status: str
+    duration_minutes: int | None = None
 
 
 @dataclass
@@ -86,6 +87,7 @@ class CalendarRow:
     scheduled_at: str
     interviewer: str
     status: str
+    duration_minutes: int = 60
 
 
 @dataclass
@@ -157,8 +159,10 @@ class BrowserDriver:
                     continue  # "No interviews scheduled." row
                 link = cells[0].query_selector("a")
                 href = link.get_attribute("href") if link else ""
+                minutes = cells[6].inner_text().split()[0] if len(cells) > 6 else "60"
                 rows.append(CalendarRow(href.rsplit("/", 1)[-1], *(c.inner_text().strip() for c in
-                                        (cells[0], cells[2], cells[3], cells[4], cells[5]))))
+                                        (cells[0], cells[2], cells[3], cells[4], cells[5])),
+                                        int(minutes) if minutes.isdigit() else 60))
             return rows, session.screenshot("read_calendar")
         except Exception as exc:  # Playwright errors -> unknown state
             raise AppUnavailable(f"Reading the interviews calendar failed: {exc}") from exc
@@ -177,7 +181,8 @@ class BrowserDriver:
         # verify_interview re-reads the same page and returns every interview row.
         check_result = self.browser.verify_interview(candidate_id, "")
         check = self._unwrap(check_result, "Reading the interviews table")
-        rows = [InterviewRow(i.id, i.round, i.scheduled_at, i.interviewer, i.status)
+        rows = [InterviewRow(i.id, i.round, i.scheduled_at, i.interviewer, i.status,
+                             getattr(i, "duration_minutes", None))
                 for i in check.scheduled_interviews]
         invites = self._unwrap(self.browser.get_invitations(candidate_id), "Reading the invitations table")
         return CandidatePage(
@@ -186,8 +191,9 @@ class BrowserDriver:
             email=details.email, job_title=details.job_title, screenshot=check_result.screenshot)
 
     def submit_interview(self, candidate_id: str, round_name: str, scheduled_at: str,
-                         interviewer: str) -> SubmitResult:
-        r = self.browser.create_interview(candidate_id, round_name, scheduled_at, interviewer)
+                         interviewer: str, duration_minutes: int = 60) -> SubmitResult:
+        r = self.browser.create_interview(candidate_id, round_name, scheduled_at, interviewer,
+                                          duration_minutes=duration_minutes)
         if r.success:
             return SubmitResult(True, "Interview form accepted", screenshot=r.screenshot)
         return SubmitResult(False, r.error.message, r.error.type,

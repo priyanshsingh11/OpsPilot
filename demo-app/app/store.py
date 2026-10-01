@@ -90,6 +90,7 @@ class Store:
         round_name: str,
         scheduled_at: str,
         interviewer: str,
+        duration_minutes: int = 60,
     ) -> Interview:
         """Create an interview, applying chaos mode and the armed failure plan.
 
@@ -111,6 +112,7 @@ class Store:
             round=round_name,
             scheduled_at=scheduled_at,
             interviewer=interviewer,
+            duration_minutes=duration_minutes,
         )
         self.interviews[interview.id] = interview.__dict__
         if planned_failure:  # after_write: saved, but the caller is told it failed
