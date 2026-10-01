@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { agentApi, api, type HealthResponse, type Run, type Scenario } from "@/lib/api";
+import { ACTIVE_STATUSES, agentApi, api, type HealthResponse, type Run, type Scenario } from "@/lib/api";
 import { deriveState } from "@/lib/runState";
 import {
   ApprovalPanel, EvidencePanel, ProgressPanel, RecoveryPanel, ResultPanel,
@@ -25,6 +25,7 @@ export default function Dashboard() {
   const [resetData, setResetData] = useState(true);
   const [run, setRun] = useState<Run | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -39,8 +40,22 @@ export default function Dashboard() {
   }, []);
 
   const online = backend.kind === "online";
-  const running = run?.status === "running";
+  const active = !!run && ACTIVE_STATUSES.includes(run.status);
   const state = deriveState(run);
+
+  // Poll until the run reaches a status where nothing is executing (finished or interrupted).
+  function watch(id: string) {
+    if (poll.current) clearInterval(poll.current);
+    poll.current = setInterval(async () => {
+      try {
+        const latest = await agentApi.getRun(id);
+        setRun(latest);
+        if (!ACTIVE_STATUSES.includes(latest.status) && poll.current) clearInterval(poll.current);
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    }, 500);
+  }
 
   async function startRun() {
     setError(null);
@@ -48,20 +63,29 @@ export default function Dashboard() {
       const { id } = await agentApi.startRun(goal, scenario, resetData);
       setRun({ id, goal, scenario, status: "running", summary: null, blocker: null,
         details: {}, events: [], created_at: null, finished_at: null });
-      if (poll.current) clearInterval(poll.current);
-      poll.current = setInterval(async () => {
-        try {
-          const latest = await agentApi.getRun(id);
-          setRun(latest);
-          if (latest.status !== "running" && poll.current) clearInterval(poll.current);
-        } catch (e) {
-          setError((e as Error).message);
-        }
-      }, 500);
+      watch(id);
     } catch (e) {
       setError((e as Error).message);
     }
   }
+
+  // Operator controls (pause, continue, stop, resume, approve, reject). Each returns the updated run.
+  async function control(action: () => Promise<Run>, rewatch = false) {
+    setError(null);
+    setBusy(true);
+    try {
+      const updated = await action();
+      setRun(updated);
+      if (rewatch || ACTIVE_STATUSES.includes(updated.status)) watch(updated.id);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const decide = (approvalId: string, decision: "approve" | "reject") =>
+    control(() => (decision === "approve" ? agentApi.approve(run!.id, approvalId) : agentApi.reject(run!.id, approvalId)));
 
   const selected = scenarios.find((s) => s.key === scenario);
 
@@ -103,9 +127,23 @@ export default function Dashboard() {
             <input type="checkbox" checked={resetData} onChange={(e) => setResetData(e.target.checked)} />
             Reset demo data first
           </label>
-          <button className={styles.run} disabled={!online || running || goal.trim().length < 3} onClick={startRun}>
-            {running ? "Running…" : "Run agent"}
-          </button>
+          <div className={styles.runBar}>
+            {run && run.status === "interrupted" && (
+              <button className={styles.secondary} disabled={busy} onClick={() => control(() => agentApi.resume(run.id), true)}>Resume</button>
+            )}
+            {run && run.status === "running" && !run.pause_requested && (
+              <button className={styles.secondary} disabled={busy} onClick={() => control(() => agentApi.pause(run.id))}>Pause</button>
+            )}
+            {run && (run.status === "paused" || (run.status === "running" && run.pause_requested)) && (
+              <button className={styles.secondary} disabled={busy} onClick={() => control(() => agentApi.continueRun(run.id))}>Continue</button>
+            )}
+            {run && (active || run.status === "interrupted") && (
+              <button className={styles.secondary} disabled={busy} onClick={() => control(() => agentApi.stop(run.id))}>Stop</button>
+            )}
+            <button className={styles.run} disabled={!online || active || goal.trim().length < 3} onClick={startRun}>
+              {active ? "Running…" : "Run agent"}
+            </button>
+          </div>
         </div>
         {selected && <p className={styles.meta}>{selected.description}</p>}
         {error && <p className={styles.error}>{error}</p>}
@@ -115,10 +153,10 @@ export default function Dashboard() {
       <ResultPanel run={run} state={state} />
 
       <div className={styles.columns}>
-        <TimelinePanel run={run} starting={!!running} />
+        <TimelinePanel run={run} starting={active} />
         <div className={styles.side}>
           <ProgressPanel run={run} state={state} />
-          <ApprovalPanel run={run} />
+          <ApprovalPanel run={run} busy={busy} onDecide={decide} />
           <RecoveryPanel run={run} />
           <VerificationPanel run={run} />
         </div>

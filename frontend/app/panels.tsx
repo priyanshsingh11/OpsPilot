@@ -1,6 +1,6 @@
-import { api, type Run, type RunEvent } from "@/lib/api";
+import { ACTIVE_STATUSES, api, type Run, type RunEvent } from "@/lib/api";
 import {
-  RESERVED_STATES, STATE_META, STATE_ORDER, deriveSteps, isPartial, lastEvent, needsApproval,
+  STATE_META, STATE_ORDER, deriveSteps, isPartial, lastEvent, needsHumanDecision,
   screenshotsOf, type Step, type UiState,
 } from "@/lib/runState";
 import styles from "./dashboard.module.css";
@@ -25,12 +25,14 @@ const offset = (run: Run, e: RunEvent) =>
 export function StatusPanel({ run, state }: { run: Run | null; state: UiState }) {
   const meta = STATE_META[state];
   const last = lastEvent(run);
-  const active = run?.status === "running";
+  const active = !!run && ACTIVE_STATUSES.includes(run.status);
+  const note = run?.status === "interrupted" ? "The backend restarted during this run. Resume to continue from where it stopped."
+    : run?.pause_requested && run.status === "running" ? "Pause requested. The agent stops after its current step." : null;
   return (
     <Panel n={3} title="Current status" className={styles.statusPanel}>
       <div className={styles.statusHead}>
         <span className={`${styles.pill} ${styles[meta.tone]}`}>{state}</span>
-        <span className={styles.blurb}>{meta.blurb}</span>
+        <span className={styles.blurb}>{note ?? meta.blurb}</span>
       </div>
       <div className={styles.nowBox}>
         <span className={styles.nowLabel}>{active ? "Doing now" : run ? "Last action" : "Doing now"}</span>
@@ -42,7 +44,7 @@ export function StatusPanel({ run, state }: { run: Run | null; state: UiState })
             key={s}
             className={`${styles.railItem} ${s === state ? `${styles.railOn} ${styles[STATE_META[s].tone]}` : ""}`}
             aria-current={s === state ? "step" : undefined}
-            title={RESERVED_STATES.includes(s) ? "Reserved: this agent has no pause control yet" : STATE_META[s].blurb}
+            title={STATE_META[s].blurb}
           >
             {s}
           </li>
@@ -79,19 +81,51 @@ export function ProgressPanel({ run, state }: { run: Run | null; state: UiState 
   );
 }
 
-// 6. Approval panel. The agent never acts past its authority; it stops and explains.
-export function ApprovalPanel({ run }: { run: Run | null }) {
-  const required = needsApproval(run);
+// 6. Approval panel. High-impact actions run only after a person approves the exact content.
+export function ApprovalPanel({ run, busy, onDecide }: {
+  run: Run | null; busy: boolean; onDecide: (approvalId: string, decision: "approve" | "reject") => void;
+}) {
+  const pending = run?.pending_approval ?? null;
+  const decided = (run?.approvals ?? []).filter((a) => a.status === "approved" || a.status === "rejected");
+  const d = pending?.details;
   return (
     <Panel n={6} title="Approval">
-      {required ? (
+      {pending && d ? (
         <div className={`${styles.callout} ${styles.warn}`}>
-          <strong>Approval required</strong>
+          <strong>{d.title ?? "Approval required"}</strong>
+          {d.action && <p>{d.action}</p>}
+          {d.email && (
+            <dl className={styles.email}>
+              <div><dt>To</dt><dd>{d.email.to}</dd></div>
+              <div><dt>Subject</dt><dd>{d.email.subject}</dd></div>
+              <div><dt>Message</dt><dd className={styles.emailBody}>{d.email.message}</dd></div>
+            </dl>
+          )}
+          {d.if_approved && <p className={styles.meta}><b>If approved:</b> {d.if_approved}</p>}
+          {d.if_rejected && <p className={styles.meta}><b>If rejected:</b> {d.if_rejected}</p>}
+          <div className={styles.actions}>
+            <button className={styles.approve} disabled={busy} onClick={() => onDecide(pending.id, "approve")}>Approve and send</button>
+            <button className={styles.secondary} disabled={busy} onClick={() => onDecide(pending.id, "reject")}>Reject</button>
+          </div>
+        </div>
+      ) : needsHumanDecision(run) ? (
+        <div className={`${styles.callout} ${styles.warn}`}>
+          <strong>A person needs to decide</strong>
           <p>{run!.blocker}</p>
-          <p className={styles.meta}>The agent made no change for this decision. It will not proceed without a person's go-ahead.</p>
+          <p className={styles.meta}>The agent changed nothing for this decision and has no way to proceed on its own.</p>
         </div>
       ) : (
-        <Empty>{run ? "No approval needed. Every action stayed within the goal's authority." : "Nothing is waiting for approval."}</Empty>
+        <Empty>Nothing is waiting for approval.</Empty>
+      )}
+      {decided.length > 0 && (
+        <ul className={styles.checks}>
+          {decided.map((a) => (
+            <li key={a.id} className={styles.check}>
+              <span className={`${styles.tag} ${a.status === "approved" ? styles.good : styles.bad}`}>{a.status.toUpperCase()}</span>
+              <span>{a.details.title ?? a.action}</span>
+            </li>
+          ))}
+        </ul>
       )}
     </Panel>
   );
@@ -133,7 +167,7 @@ export function VerificationPanel({ run }: { run: Run | null }) {
   return (
     <Panel n={8} title="Verification">
       {checks.length === 0 ? (
-        <Empty>No checks yet. Results are read back from the app's own records.</Empty>
+        <Empty>No checks yet. Results are read back from the app&apos;s own records.</Empty>
       ) : (
         <ul className={styles.checks}>
           {checks.map((e) => {
@@ -157,22 +191,23 @@ export function ResultPanel({ run, state }: { run: Run | null; state: UiState })
   const details = run?.details ?? {};
   const rows: [string, string][] = [];
   if (typeof details.interview_id === "string") rows.push(["Interview", details.interview_id]);
+  if (typeof details.invitation === "string") rows.push(["Invitation", details.invitation.replace("_", " ")]);
   if (typeof details.attempts === "number") rows.push(["Attempts", String(details.attempts)]);
   if (typeof details.created_by_agent === "boolean")
     rows.push(["Created by", details.created_by_agent ? "This run" : "Already existed (nothing duplicated)"]);
 
   return (
     <Panel n={9} title="Final result" className={styles.resultPanel}>
-      {!run || run.status === "running" ? (
+      {!run || ACTIVE_STATUSES.includes(run.status) || run.status === "interrupted" ? (
         <Empty>{run ? "In progress. The result appears here when the run ends." : "No result yet."}</Empty>
       ) : (
         <div className={`${styles.callout} ${styles[meta.tone]}`}>
           <strong>{meta.label}</strong>
-          {run.status === "completed" ? (
+          {run.status === "completed" || run.status === "rejected" || run.status === "stopped" ? (
             <p>{run.summary}</p>
           ) : (
             <>
-              {isPartial(run) && <p>The interview is scheduled and verified, but a later step did not finish.</p>}
+              {isPartial(run) && <p>Earlier steps are done and verified, but a later step did not finish.</p>}
               <p><b>Blocker:</b> {run.blocker}</p>
             </>
           )}
@@ -224,7 +259,8 @@ export function EvidencePanel({ run }: { run: Run | null }) {
 const TONE: Record<string, string> = {
   ACTION_FAILED: "bad", BLOCKED: "bad", RECOVERY_STARTED: "warn", RETRY: "warn",
   STATE_CHECK: "info", VERIFICATION: "info", ACTION_SUCCEEDED: "good", COMPLETED: "good",
-  SKIPPED: "neutral", SETUP: "neutral",
+  SKIPPED: "neutral", SETUP: "neutral", APPROVAL_REQUESTED: "warn", APPROVAL_GRANTED: "good",
+  PAUSED: "warn", RESUMED: "info", RUN_RESTARTED: "warn", REJECTED: "warn", STOPPED: "neutral",
 };
 
 export function TimelinePanel({ run, starting }: { run: Run | null; starting: boolean }) {
@@ -235,7 +271,7 @@ export function TimelinePanel({ run, starting }: { run: Run | null; starting: bo
       ) : (
         <ol className={styles.timeline}>
           {run.events.map((e, i) => (
-            <li key={e.seq} className={`${styles.event} ${i === run.events.length - 1 && run.status === "running" ? styles.eventLive : ""}`}>
+            <li key={e.seq} className={`${styles.event} ${i === run.events.length - 1 && ACTIVE_STATUSES.includes(run.status) ? styles.eventLive : ""}`}>
               <time className={styles.eventTime}>{offset(run, e)}</time>
               <span className={`${styles.tag} ${styles[TONE[e.type] ?? "neutral"]}`}>{e.type.replace("_", " ")}</span>
               <span className={styles.eventMessage}>{e.message}</span>

@@ -9,7 +9,7 @@ from app.agent.runner import AgentOptions, run_goal
 
 from conftest import interviews_for
 
-GOAL = "Schedule a Technical Screen for Aarav Sharma with Priya Nair on 2026-10-08 at 10:00"
+GOAL = "Schedule a Technical Screen for Aarav Sharma with Priya Nair on 2026-10-08 at 10:00. Do not send an invitation."
 AARAV = "cand-aarav"
 FAST = AgentOptions(retry_backoff_seconds=0)
 
@@ -104,7 +104,7 @@ def test_recovers_once_outage_clears(driver, harness, log):
 
 
 def test_variation_without_code_change(driver, harness, log):
-    goal = "Book a system design round for Ishaan Mehta with Rahul Verma on October 9, 2026 at 3pm"
+    goal = "Book a system design round for Ishaan Mehta with Rahul Verma on October 9, 2026 at 3pm, without sending an invitation"
     result = run(driver, harness, log, "saved_but_failed", goal)
 
     assert result.status == "completed"
@@ -115,7 +115,7 @@ def test_variation_without_code_change(driver, harness, log):
 
 def test_conflicting_booking_needs_approval(driver, harness, log):
     # Seed: Sneha already has a Technical Screen on 2026-10-06 14:00 with Priya Nair.
-    goal = "Schedule a Technical Screen for Sneha Reddy with Priya Nair on 2026-10-09 at 11:00"
+    goal = "Schedule a Technical Screen for Sneha Reddy with Priya Nair on 2026-10-09 at 11:00. Do not send an invitation."
     result = run(driver, harness, log, "none", goal)
 
     assert result.status == "blocked" and "needs your approval" in result.blocker
@@ -124,7 +124,7 @@ def test_conflicting_booking_needs_approval(driver, harness, log):
 
 
 def test_rejected_candidate_needs_approval(driver, harness, log):
-    goal = "Schedule a Technical Screen for Kabir Singh with Priya Nair on 2026-10-09 at 11:00"
+    goal = "Schedule a Technical Screen for Kabir Singh with Priya Nair on 2026-10-09 at 11:00. Do not send an invitation."
     result = run(driver, harness, log, "none", goal)
     assert result.status == "blocked" and "rejected" in result.blocker
     assert interviews_for(harness, "cand-kabir") == []

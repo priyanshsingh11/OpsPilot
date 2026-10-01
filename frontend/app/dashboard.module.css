@@ -25,7 +25,8 @@
 .field label { font-size: 12px; color: var(--muted); }
 .field select { font: inherit; font-size: 14px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: inherit; }
 .checkbox { display: flex; align-items: center; gap: 6px; font-size: 14px; padding-bottom: 7px; }
-.run { margin-left: auto; font: inherit; font-weight: 600; font-size: 14px; padding: 9px 22px; border-radius: 6px; border: none; background: var(--accent); color: #fff; cursor: pointer; }
+.runBar { margin-left: auto; display: flex; gap: 8px; }
+.run { font: inherit; font-weight: 600; font-size: 14px; padding: 9px 22px; border-radius: 6px; border: none; background: var(--accent); color: #fff; cursor: pointer; }
 .run:disabled { opacity: 0.45; cursor: not-allowed; }
 @media (prefers-color-scheme: dark) { .run { color: #0e1014; } }
 
@@ -51,7 +52,7 @@
 /* Layout */
 .columns { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 .side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-@media (max-width: 900px) { .columns { grid-template-columns: 1fr; } .run { margin-left: 0; } }
+@media (max-width: 900px) { .columns { grid-template-columns: 1fr; } .runBar { margin-left: 0; } }
 
 /* Timeline */
 .timeline { list-style: none; display: flex; flex-direction: column; }
@@ -101,3 +102,15 @@
 .shots a { display: block; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; height: 150px; background: var(--surface-2); }
 .shots img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
 .shotCap { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+
+/* Buttons and approval content */
+.secondary, .approve { font: inherit; font-weight: 600; font-size: 14px; padding: 9px 16px; border-radius: 6px; cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--foreground); }
+.approve { background: var(--accent); border-color: var(--accent); color: #fff; }
+@media (prefers-color-scheme: dark) { .approve { color: #0e1014; } }
+.secondary:disabled, .approve:disabled { opacity: 0.45; cursor: not-allowed; }
+.secondary:focus-visible, .approve:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.actions { display: flex; gap: 8px; margin-top: 4px; }
+.email { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 6px; background: var(--surface); color: var(--foreground); border: 1px solid var(--border); }
+.email dt { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.email dd { font-size: 14px; }
+.emailBody { white-space: pre-wrap; }

@@ -24,7 +24,8 @@ export const api = {
 export type EventType =
   | "GOAL_RECEIVED" | "PLAN" | "SETUP" | "STATE_CHECK" | "ACTION" | "ACTION_SUCCEEDED"
   | "ACTION_FAILED" | "RECOVERY_STARTED" | "RETRY" | "SKIPPED" | "VERIFICATION"
-  | "COMPLETED" | "BLOCKED";
+  | "COMPLETED" | "BLOCKED" | "APPROVAL_REQUESTED" | "APPROVAL_GRANTED" | "PAUSED"
+  | "RESUMED" | "RUN_RESTARTED" | "REJECTED" | "STOPPED";
 
 export interface RunEvent {
   seq: number;
@@ -34,11 +35,35 @@ export interface RunEvent {
   data: Record<string, unknown>;
 }
 
+export type RunStatus =
+  | "running" | "paused" | "awaiting_approval" | "interrupted"
+  | "completed" | "blocked" | "stopped" | "rejected";
+
+// Statuses in which the agent thread is alive and the dashboard should keep polling.
+export const ACTIVE_STATUSES: RunStatus[] = ["running", "paused", "awaiting_approval"];
+
+export interface Approval {
+  id: string;
+  action: string;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  details: {
+    title?: string;
+    action?: string;
+    candidates?: { id: string; name: string; email: string; status: string }[];
+    email?: { to: string; subject: string; message: string };
+    if_approved?: string;
+    if_rejected?: string;
+  };
+}
+
 export interface Run {
   id: string;
   goal: string;
   scenario: string | null;
-  status: "running" | "completed" | "blocked";
+  status: RunStatus;
+  approvals?: Approval[];
+  pending_approval?: Approval | null;
+  pause_requested?: boolean;
   summary: string | null;
   blocker: string | null;
   details: Record<string, unknown>;
@@ -71,4 +96,10 @@ export const agentApi = {
   startRun: (goal: string, scenario: string | null, resetDemoData: boolean) =>
     send<{ id: string }>("/api/runs", { goal, scenario, reset_demo_data: resetDemoData }),
   getRun: (id: string) => request<Run>(`/api/runs/${id}`),
+  pause: (id: string) => send<Run>(`/api/runs/${id}/pause`, {}),
+  continueRun: (id: string) => send<Run>(`/api/runs/${id}/continue`, {}),
+  stop: (id: string) => send<Run>(`/api/runs/${id}/stop`, {}),
+  resume: (id: string) => send<Run>(`/api/runs/${id}/resume`, {}),
+  approve: (id: string, approvalId: string) => send<Run>(`/api/runs/${id}/approvals/${approvalId}/approve`, {}),
+  reject: (id: string, approvalId: string) => send<Run>(`/api/runs/${id}/approvals/${approvalId}/reject`, {}),
 };

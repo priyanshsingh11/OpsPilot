@@ -83,3 +83,36 @@ def log():
 def interviews_for(harness: HarnessClient, candidate_id: str, round_name: str | None = None) -> list[dict]:
     return [i for i in harness.source_of_truth()["interviews"]
             if i["candidate_id"] == candidate_id and (round_name is None or i["round"] == round_name)]
+
+
+@pytest.fixture()
+def api_env(demo_app_url, tmp_path, monkeypatch):
+    """The real FastAPI app on an isolated SQLite file, driving a real browser against the demo app."""
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app import database, main
+    from app.agent import manager
+    from app.agent.runner import AgentOptions
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'api.db'}", connect_args={"check_same_thread": False})
+    monkeypatch.setattr(database, "engine", engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    def tools():  # a fresh browser in the run's own thread, like production
+        return (BrowserDriver.launch(demo_app_url, screenshot_dir=str(tmp_path)),
+                HarnessClient.connect(demo_app_url))
+
+    options = AgentOptions(retry_backoff_seconds=0)
+    monkeypatch.setattr(main, "runs", manager.RunManager(tools, options, session_factory))
+    database.Base.metadata.create_all(bind=engine)
+    with TestClient(main.app) as client:
+        yield SimpleNamespace(client=client, tools=tools, options=options, session_factory=session_factory)
+
+
+@pytest.fixture()
+def api(api_env):
+    return api_env.client

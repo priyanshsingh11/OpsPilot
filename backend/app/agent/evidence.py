@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
 SUCCEEDED, FAILED, SKIPPED = "succeeded", "failed", "skipped"
+BLOCKED = "blocked"  # not attempted: needs approval or different input
 
 
 def _now() -> str:
@@ -29,7 +30,7 @@ class ActionRecord:
     target: str | None = None  # candidate id the action is about, if any
     started_at: str = field(default_factory=_now)
     finished_at: str | None = None
-    status: str = "running"  # running | succeeded | failed | skipped
+    status: str = "running"  # running | succeeded | failed | skipped | blocked
     result: dict | None = None
     error: str | None = None
     # Set when this action is part of recovering from an earlier failed action:

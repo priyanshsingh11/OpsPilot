@@ -132,7 +132,8 @@ def verify_interview(harness: HarnessClient, log: ev.RunLog, req: InterviewReque
 
 def schedule_interview(driver: BrowserDriver, harness: HarnessClient, log: ev.RunLog,
                        req: InterviewRequest, *, ledger: ActionLedger | None = None,
-                       max_attempts: int = 3, backoff_seconds: float = 1.0) -> StepOutcome:
+                       max_attempts: int = 3, backoff_seconds: float = 1.0,
+                       checkpoint=lambda: None) -> StepOutcome:
     ledger = ledger or ActionLedger()
     who, cid = req.candidate_name, req.candidate_id
     req_input = {**req.__dict__}
@@ -252,6 +253,7 @@ def schedule_interview(driver: BrowserDriver, harness: HarnessClient, log: ev.Ru
                  f"retrying in {delay:g}s ({max_attempts - attempt} attempt(s) left).",
                  decision="retry", reason="not_applied_and_transient", backoff_seconds=delay)
         time.sleep(delay)
+        checkpoint()  # a stop or pause lands here, after the state check and before any retry
         log.emit(ev.RETRY, f"Retry {attempt}: resubmitting the Schedule Interview form.",
                  attempt=attempt + 1, max_attempts=max_attempts)
 

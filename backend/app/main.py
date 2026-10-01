@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import models  # noqa: F401  (registers tables with Base before init_db)
-from .agent.manager import RunInProgress, RunManager
+from .agent.manager import ControlError, NotFound, RunInProgress, RunManager
 from .agent.scenarios import SCENARIOS
 from .config import settings
 from .database import check_db, init_db
@@ -20,6 +20,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    recovered = runs.recover()
+    if recovered:
+        logging.getLogger("opspilot").warning("%d run(s) were interrupted by a restart and can be resumed", recovered)
     yield
 
 
@@ -87,3 +90,48 @@ def get_run(run_id: str) -> dict:
     if run is None:
         raise HTTPException(404, "Run not found")
     return run
+
+
+def _control(action):
+    """Run a manager control and map its errors to HTTP, then return the run's new state."""
+    def handler(run_id: str, *args) -> dict:
+        try:
+            action(run_id, *args)
+        except NotFound as exc:
+            raise HTTPException(404, str(exc)) from None
+        except ControlError as exc:
+            raise HTTPException(409, str(exc)) from None
+        except RunInProgress as exc:
+            raise HTTPException(409, f"Run {exc} is still in progress") from None
+        return runs.get(run_id)
+    return handler
+
+
+@app.post("/api/runs/{run_id}/pause")
+def pause_run(run_id: str) -> dict:
+    return _control(runs.pause)(run_id)
+
+
+@app.post("/api/runs/{run_id}/continue")
+def continue_run(run_id: str) -> dict:
+    return _control(runs.continue_run)(run_id)
+
+
+@app.post("/api/runs/{run_id}/stop")
+def stop_run(run_id: str) -> dict:
+    return _control(runs.stop)(run_id)
+
+
+@app.post("/api/runs/{run_id}/resume", status_code=202)
+def resume_run(run_id: str) -> dict:
+    return _control(runs.resume)(run_id)
+
+
+@app.post("/api/runs/{run_id}/approvals/{approval_id}/approve")
+def approve(run_id: str, approval_id: str) -> dict:
+    return _control(lambda r, a: runs.decide(r, a, "approved"))(run_id, approval_id)
+
+
+@app.post("/api/runs/{run_id}/approvals/{approval_id}/reject")
+def reject(run_id: str, approval_id: str) -> dict:
+    return _control(lambda r, a: runs.decide(r, a, "rejected"))(run_id, approval_id)
