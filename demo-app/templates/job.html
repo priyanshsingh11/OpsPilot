@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}{{ job.title }}{% endblock %}
+{% block content %}
+<p><a href="/">&larr; All jobs</a></p>
+<h1 data-testid="job-title">{{ job.title }}</h1>
+<form method="get" class="inline" data-testid="status-filter-form">
+  <label for="status-filter">Filter by status</label>
+  <select id="status-filter" name="status" data-testid="status-filter">
+    <option value="">All statuses</option>
+    {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if s == selected }}>{{ s }}</option>{% endfor %}
+  </select>
+  <button type="submit" data-testid="apply-filter-button">Apply filter</button>
+</form>
+<p class="muted" data-testid="candidate-count">{{ candidates|length }} candidate(s)</p>
+<table data-testid="candidate-table">
+  <thead><tr><th>Name</th><th>Experience</th><th>Current company</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for c in candidates %}
+  <tr data-testid="candidate-row-{{ c.id }}">
+    <td data-testid="candidate-name-{{ c.id }}">{{ c.name }}</td>
+    <td>{{ c.years_experience }} yrs</td>
+    <td>{{ c.current_company }}</td>
+    <td><span class="pill status-{{ c.status|lower|replace(' ', '-') }}" data-testid="candidate-status-{{ c.id }}">{{ c.status }}</span></td>
+    <td><a href="/candidates/{{ c.id }}" data-testid="view-candidate-{{ c.id }}">View details</a></td>
+  </tr>
+  {% else %}
+  <tr><td colspan="5" data-testid="no-candidates">No candidates match this filter.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Jobs{% endblock %}
+{% block content %}
+<h1>Open jobs</h1>
+<div class="cards" data-testid="job-list">
+  {% for job in jobs %}
+  <article class="card" data-testid="job-card-{{ job.id }}">
+    <h2>{{ job.title }}</h2>
+    <p class="muted">{{ job.location }}</p>
+    <p>{{ job.description }}</p>
+    <p><span data-testid="job-{{ job.id }}-candidate-count">{{ job.candidate_count }}</span> candidates ·
+       <span data-testid="job-{{ job.id }}-shortlisted-count">{{ job.shortlisted_count or 0 }}</span> shortlisted</p>
+    <a class="btn" href="/jobs/{{ job.id }}" data-testid="view-job-{{ job.id }}">View candidates</a>
+  </article>
+  {% endfor %}
+</div>
+{% endblock %}
