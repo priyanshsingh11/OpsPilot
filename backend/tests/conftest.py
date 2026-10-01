@@ -8,7 +8,8 @@ from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
-sys.path.insert(0, str(ROOT / "demo-app"))
+# Appended, not prepended: demo-app/ must not shadow the backend's `app` package.
+sys.path.append(str(ROOT / "demo-app"))
 
 import db as demo_db  # noqa: E402  (demo-app/db.py)
 
