@@ -1,8 +1,10 @@
 import logging
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import models  # noqa: F401  (registers tables with Base before init_db)
@@ -29,6 +31,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Read-only: lets the dashboard show the screenshots the browser captured as run evidence.
+SCREENSHOT_DIR = Path(__file__).resolve().parents[2] / "screenshots"
+app.mount("/screenshots", StaticFiles(directory=SCREENSHOT_DIR, check_dir=False), name="screenshots")
 
 
 @app.get("/api/health")
