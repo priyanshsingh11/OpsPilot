@@ -33,6 +33,7 @@ class InterviewGoal:
     round_name: str
     interviewer: str
     scheduled_at: str  # YYYY-MM-DDTHH:MM, the format of the app's datetime-local field
+    send_invitation: bool = True  # always asks for approval first; False if the goal opts out
     assumptions: list[str] = field(default_factory=list)
 
 
@@ -86,6 +87,10 @@ def _parse_round(text: str, candidate: str) -> str | None:
     return " ".join(w if w.isupper() else w.capitalize() for w in words.split())
 
 
+_NO_INVITE = re.compile(r"\b(?:do not|don't|dont|without|skip|no)\s+(?:sending\s+|send\s+)?(?:an?\s+|the\s+|any\s+)?"
+                        r"(?:invit\w+|e-?mail\w*)", re.I)
+
+
 def parse_interview_goal(text: str, candidates: list[str], known_interviewers: list[str] = (),
                          today: date | None = None) -> InterviewGoal:
     today = today or date.today()
@@ -123,4 +128,80 @@ def parse_interview_goal(text: str, candidates: list[str], known_interviewers: l
     if round_name is None:
         round_name = DEFAULT_ROUND
         assumptions.append(f"No interview round named; using '{DEFAULT_ROUND}'.")
-    return InterviewGoal(found[0], round_name, interviewer, f"{day}T{start}", assumptions)
+    send = not _NO_INVITE.search(text)
+    if send:
+        assumptions.append("Sending the invitation is part of this goal; it needs your approval first.")
+    return InterviewGoal(found[0], round_name, interviewer, f"{day}T{start}", send, assumptions)
+
+
+# ---- batch goals ---------------------------------------------------------------
+
+PIPELINE_STATUSES = ["applied", "screening", "shortlisted", "interview", "offer"]
+DEFAULT_BATCH_START = "10:00"
+
+
+@dataclass
+class BatchInterviewGoal:
+    """'Schedule interviews for shortlisted AI Engineer candidates' and variations."""
+
+    job_title: str
+    candidate_status: str
+    round_name: str
+    interviewer: str | None  # None -> the job's hiring manager
+    date: str  # YYYY-MM-DD
+    start_time: str  # first slot; later slots follow hourly
+    assumptions: list[str] = field(default_factory=list)
+
+
+def _next_business_day(today: date) -> date:
+    d = today + timedelta(days=1)
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    return d
+
+
+def _parse_batch_round(text: str, status: str) -> str | None:
+    m = re.search(rf"\b(?:schedule|book|set up|arrange)\s+(?:an?\s+|the\s+)?(.+?)\s+for\s+(?:all\s+)?(?:the\s+|our\s+)?"
+                  rf"{status}\b", text, re.I)
+    if not m or m[1].lower() in ("interview", "interviews", "an interview"):
+        return None
+    words = m[1].split()
+    if words[-1].lower().endswith("s") and not words[-1].lower().endswith("ss"):
+        words[-1] = words[-1][:-1]  # "technical screens" -> "technical screen"
+    return " ".join(w if w.isupper() else w.capitalize() for w in words)
+
+
+def parse_batch_goal(text: str, job_titles: list[str], today: date | None = None) -> BatchInterviewGoal | None:
+    """Return a batch goal if the text targets a group of candidates, else None."""
+    today = today or date.today()
+    low = text.lower()
+    status = next((s for s in PIPELINE_STATUSES if re.search(rf"\b{s}\b", low)), None)
+    jobs = _find_names(text, job_titles)
+    if not status or not re.search(r"\bcandidates\b", low) or not re.search(
+            r"\b(schedule|book|set up|arrange)\b", low):
+        return None
+    if len(jobs) != 1:
+        raise GoalError([f"Name exactly one job ({', '.join(job_titles)})." if not jobs
+                         else f"Goal names more than one job: {', '.join(jobs)}."])
+
+    assumptions: list[str] = []
+    round_name = _parse_batch_round(text, status)
+    if round_name is None:
+        round_name = DEFAULT_ROUND
+        assumptions.append(f"No interview round named; using '{DEFAULT_ROUND}'.")
+    m = re.search(rf"\bwith\s+({NAME})", text)
+    interviewer = m[1] if m and m[1] not in jobs else None
+    if interviewer is None:
+        assumptions.append(f"No interviewer named; using the {jobs[0]} hiring manager.")
+    try:
+        day = _parse_date(text, today)
+    except ValueError:
+        raise GoalError(["The interview date in the goal is not a valid date."]) from None
+    if day is None:
+        day = _next_business_day(today).isoformat()
+        assumptions.append(f"No date given; using the next business day, {day}.")
+    start = _parse_time(text)
+    if start is None:
+        start = DEFAULT_BATCH_START
+        assumptions.append(f"No start time given; first slot at {start}, then hourly.")
+    return BatchInterviewGoal(jobs[0], status, round_name, interviewer, day, start, assumptions)

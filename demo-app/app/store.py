@@ -14,6 +14,7 @@ owns the failure simulation for the interview service:
 import copy
 import itertools
 import os
+from datetime import datetime
 
 from .models import CANDIDATES, INTERVIEWS, JOBS, Candidate, Interview
 
@@ -32,6 +33,8 @@ class Store:
         self.candidates: dict[str, dict] = {c.id: copy.deepcopy(c.__dict__) for c in CANDIDATES}
         self.interviews: dict[str, dict] = {i.id: copy.deepcopy(i.__dict__) for i in INTERVIEWS}
         self._interview_counter = itertools.count(1)
+        self.invitations: dict[str, dict] = {}
+        self._invitation_counter = itertools.count(1)
         # When True, creating an interview fails with a 500 (simulated outage).
         self.chaos_mode: bool = False
         mode = os.getenv("DEMO_FAILURE_MODE", "before_write").strip()
@@ -113,6 +116,35 @@ class Store:
         if planned_failure:  # after_write: saved, but the caller is told it failed
             raise InterviewServiceError("Calendar sync timed out (simulated). Please check the calendar.")
         return interview
+
+
+    # --- Invitations ---
+    def invitations_for_candidate(self, candidate_id: str) -> list[dict]:
+        return [i for i in self.invitations.values() if i["candidate_id"] == candidate_id]
+
+    def send_invitation(self, candidate_id: str, interview_id: str, subject: str, message: str) -> dict:
+        """Record an invitation email as sent. Like the real mail service it does not dedupe:
+        sending twice sends twice, so callers must check before sending."""
+        candidate = self.candidates.get(candidate_id)
+        interview = self.interviews.get(interview_id)
+        if candidate is None:
+            raise ValueError("Candidate not found")
+        if interview is None or interview["candidate_id"] != candidate_id or interview["status"] != "scheduled":
+            raise ValueError("Choose one of this candidate's scheduled interviews")
+        if not subject.strip() or not message.strip():
+            raise ValueError("Subject and message are required")
+        invitation = {
+            "id": f"inv-{next(self._invitation_counter)}",
+            "candidate_id": candidate_id,
+            "interview_id": interview_id,
+            "to": candidate["email"],
+            "subject": subject.strip(),
+            "message": message.strip(),
+            "status": "sent",
+            "sent_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        self.invitations[invitation["id"]] = invitation
+        return invitation
 
 
 class InterviewServiceError(Exception):

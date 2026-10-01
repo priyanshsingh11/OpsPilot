@@ -22,6 +22,7 @@ from .results import (
     CandidateSummary,
     InterviewDetails,
     InterviewVerification,
+    InvitationDetails,
     JobSummary,
     StatusUpdate,
 )
@@ -33,6 +34,7 @@ __all__ = [
     "CandidateSummary",
     "InterviewDetails",
     "InterviewVerification",
+    "InvitationDetails",
     "JobSummary",
     "RecruitmentBrowser",
     "StatusUpdate",

@@ -98,6 +98,7 @@ def candidate_detail(request: Request, candidate_id: str) -> HTMLResponse:
             "candidate": candidate,
             "job": job,
             "interviews": interviews,
+            "invitations": store.invitations_for_candidate(candidate_id),
             "statuses": CANDIDATE_STATUSES,
             "now": _now(),
         },
@@ -125,6 +126,22 @@ def update_candidate_status(request: Request, candidate_id: str, status: str = F
         url=f"/candidates/{candidate_id}?flash=Status+updated+to+{status}",
         status_code=303,
     )
+
+
+@app.post("/candidates/{candidate_id}/invitations", response_class=HTMLResponse)
+def send_invitation(
+    request: Request,
+    candidate_id: str,
+    interview_id: str = Form(...),
+    subject: str = Form(...),
+    message: str = Form(...),
+) -> HTMLResponse:
+    try:
+        store.send_invitation(candidate_id, interview_id, subject, message)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            request, "error.html", {"message": str(exc), "status_code": 400}, status_code=400)
+    return RedirectResponse(url=f"/candidates/{candidate_id}?flash=Invitation+sent", status_code=303)
 
 
 @app.get("/candidates/{candidate_id}/interviews/new", response_class=HTMLResponse)
@@ -243,6 +260,7 @@ def api_state() -> JSONResponse:
     return JSONResponse({
         "candidates": store.list_candidates_all(),
         "interviews": store.list_interviews(),
+        "invitations": list(store.invitations.values()),
         "failure": store.failure_state(),
     })
 

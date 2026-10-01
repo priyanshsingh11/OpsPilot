@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from .config import settings
@@ -17,8 +17,11 @@ class Base(DeclarativeBase):
 
 
 def init_db() -> None:
-    """Create tables for all registered models (none yet in Phase 1)."""
+    """Create tables for all registered models, and add columns introduced after a table existed."""
     Base.metadata.create_all(bind=engine)
+    if "checkpoint" not in {c["name"] for c in inspect(engine).get_columns("agent_runs")}:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE agent_runs ADD COLUMN checkpoint JSON"))
 
 
 def check_db() -> bool:

@@ -11,14 +11,19 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import httpx
 
+from .control import ApprovalGrant, ApprovalRequired
+
 ROOT_DIR = Path(__file__).resolve().parents[3]
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))  # makes the top-level `automation` package importable
+
+# Screenshots (evidence) live under here, one folder per run; served by the backend at /evidence.
+SCREENSHOT_ROOT = ROOT_DIR / "screenshots"
 
 # Failure categories from automation/errors.py that may succeed on a later attempt.
 TRANSIENT_ERRORS = {"server_error", "timeout", "browser", "navigation", "unknown"}
@@ -46,11 +51,41 @@ class InterviewRow:
 
 
 @dataclass
+class InvitationRow:
+    id: str
+    interview_id: str
+    to: str
+    subject: str
+    status: str
+
+
+@dataclass
 class CandidatePage:
     id: str
     name: str
     status: str
     interviews: list[InterviewRow]
+    invitations: list[InvitationRow] = field(default_factory=list)
+    email: str = ""
+    job_title: str = ""
+    screenshot: str | None = None
+
+
+@dataclass
+class JobRef:
+    id: str
+    title: str
+    hiring_manager: str
+
+
+@dataclass
+class CalendarRow:
+    candidate_id: str
+    candidate_name: str
+    round: str
+    scheduled_at: str
+    interviewer: str
+    status: str
 
 
 @dataclass
@@ -71,11 +106,11 @@ class BrowserDriver:
         self.browser = browser  # automation.RecruitmentBrowser (or a test double)
 
     @classmethod
-    def launch(cls, base_url: str, headless: bool = True, screenshot_dir: str | None = None) -> "BrowserDriver":
+    def launch(cls, base_url: str, headless: bool = True, screenshot_dir: str | Path | None = None) -> "BrowserDriver":
         from automation import RecruitmentBrowser
 
         browser = RecruitmentBrowser(base_url=base_url, headless=headless,
-                                     screenshot_dir=screenshot_dir or str(ROOT_DIR / "screenshots"))
+                                     screenshot_dir=str(screenshot_dir or SCREENSHOT_ROOT))
         browser.launch()
         return cls(browser)
 
@@ -97,24 +132,73 @@ class BrowserDriver:
             out += [CandidateRef(c.id, c.name, c.status, job.id) for c in cands]
         return out
 
-    def hiring_managers(self) -> list[str]:
+    def list_jobs(self) -> list[JobRef]:
         jobs = self._unwrap(self.browser.open_jobs(), "Opening the jobs page")
-        return sorted({j.hiring_manager for j in jobs})
+        return [JobRef(j.id, j.title, j.hiring_manager) for j in jobs]
+
+    def hiring_managers(self) -> list[str]:
+        return sorted({j.hiring_manager for j in self.list_jobs()})
+
+    def filter_candidates(self, job_id: str, status: str) -> list[CandidateRef]:
+        """Open a job's candidate list and apply the status filter in the UI."""
+        cands = self._unwrap(self.browser.filter_candidates(job_id, status=status), "Filtering candidates")
+        return [CandidateRef(c.id, c.name, c.status, job_id) for c in cands]
+
+    def list_interviews(self) -> tuple[list[CalendarRow], str | None]:
+        """Open the interviews calendar page and read every row. Returns (rows, screenshot)."""
+        session = self.browser.session
+        try:
+            session.goto("/interviews")
+            session.page.wait_for_selector('[data-testid="interviews-table"]')
+            rows = []
+            for tr in session.page.query_selector_all('[data-testid="interviews-table"] tbody tr'):
+                cells = tr.query_selector_all("td")
+                if len(cells) < 6:
+                    continue  # "No interviews scheduled." row
+                link = cells[0].query_selector("a")
+                href = link.get_attribute("href") if link else ""
+                rows.append(CalendarRow(href.rsplit("/", 1)[-1], *(c.inner_text().strip() for c in
+                                        (cells[0], cells[2], cells[3], cells[4], cells[5]))))
+            return rows, session.screenshot("read_calendar")
+        except Exception as exc:  # Playwright errors -> unknown state
+            raise AppUnavailable(f"Reading the interviews calendar failed: {exc}") from exc
+
+    def capture_page(self, path: str, label: str) -> str | None:
+        """Open a page and save a full-page screenshot as evidence."""
+        try:
+            self.browser.session.goto(path)
+            return self.browser.session.screenshot(label)
+        except Exception:
+            return None
 
     def read_candidate(self, candidate_id: str) -> CandidatePage:
         """Open the candidate's profile and read their status and interviews table."""
         details = self._unwrap(self.browser.get_candidate(candidate_id), "Opening the candidate page")
         # verify_interview re-reads the same page and returns every interview row.
-        check = self._unwrap(self.browser.verify_interview(candidate_id, ""), "Reading the interviews table")
+        check_result = self.browser.verify_interview(candidate_id, "")
+        check = self._unwrap(check_result, "Reading the interviews table")
         rows = [InterviewRow(i.id, i.round, i.scheduled_at, i.interviewer, i.status)
                 for i in check.scheduled_interviews]
-        return CandidatePage(candidate_id, details.name, details.status, rows)
+        return CandidatePage(candidate_id, details.name, details.status, rows, check_result.screenshot)
 
     def submit_interview(self, candidate_id: str, round_name: str, scheduled_at: str,
                          interviewer: str) -> SubmitResult:
         r = self.browser.create_interview(candidate_id, round_name, scheduled_at, interviewer)
         if r.success:
             return SubmitResult(True, "Interview form accepted", screenshot=r.screenshot)
+        return SubmitResult(False, r.error.message, r.error.type,
+                            str(r.error.details.get("status_code")) if r.error.details else None,
+                            r.screenshot)
+
+    def send_invitation(self, grant: ApprovalGrant, payload: dict) -> SubmitResult:
+        """Send the invitation email. Refuses unless the user's approval for exactly this payload
+        is still in force, checked against the database at the moment of the action."""
+        if not grant.authorizes("send_invitation", payload):
+            raise ApprovalRequired("No valid user approval for this invitation; nothing was sent.")
+        r = self.browser.send_invitation(payload["candidate_id"], payload["interview_id"],
+                                         payload["subject"], payload["message"])
+        if r.success:
+            return SubmitResult(True, "Invitation form accepted", screenshot=r.screenshot)
         return SubmitResult(False, r.error.message, r.error.type,
                             str(r.error.details.get("status_code")) if r.error.details else None,
                             r.screenshot)

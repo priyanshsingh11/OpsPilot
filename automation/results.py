@@ -117,3 +117,14 @@ class InterviewVerification:
     found: bool
     interview: Optional[InterviewDetails] = None
     scheduled_interviews: list[InterviewDetails] = field(default_factory=list)
+
+
+@dataclass
+class InvitationDetails:
+    """One row of the candidate page's invitations table."""
+
+    id: str
+    interview_id: str
+    to: str
+    subject: str
+    status: str

@@ -21,6 +21,7 @@ from .results import (
     CandidateSummary,
     InterviewDetails,
     InterviewVerification,
+    InvitationDetails,
     JobSummary,
     StatusUpdate,
 )
@@ -117,6 +118,23 @@ class RecruitmentBrowser:
         return self._run(
             "verify_interview",
             lambda: self._do_verify_interview(candidate_id, round_name),
+        )
+
+    def get_invitations(self, candidate_id: str) -> ActionResult[list[InvitationDetails]]:
+        """Open a candidate's page and read the invitations already sent."""
+        return self._run("get_invitations", lambda: self._do_get_invitations(candidate_id))
+
+    def send_invitation(
+        self, candidate_id: str, interview_id: str, subject: str, message: str
+    ) -> ActionResult[InvitationDetails]:
+        """Send an interview invitation through the candidate page's invitation form.
+
+        This sends an email to a candidate. Callers decide whether it is allowed;
+        this layer only operates the form.
+        """
+        return self._run(
+            "send_invitation",
+            lambda: self._do_send_invitation(candidate_id, interview_id, subject, message),
         )
 
     def toggle_chaos_mode(self, enabled: bool) -> ActionResult[bool]:
@@ -292,6 +310,36 @@ class RecruitmentBrowser:
             scheduled_interviews=interviews,
         )
 
+    def _do_get_invitations(self, candidate_id: str) -> list[InvitationDetails]:
+        self.session.goto(f"/candidates/{candidate_id}")
+        self.session.page.wait_for_selector('[data-testid="invitations-table"]')
+        return self._extract_invitations_from_candidate_page()
+
+    def _do_send_invitation(
+        self, candidate_id: str, interview_id: str, subject: str, message: str
+    ) -> InvitationDetails:
+        before = {i.id for i in self._do_get_invitations(candidate_id)}
+        page = self.session.page
+        page.wait_for_selector('[data-testid="invitation-form"]')
+        page.select_option('[data-testid="invitation-interview"]', interview_id)
+        page.fill('[data-testid="invitation-subject"]', subject)
+        page.fill('[data-testid="invitation-message"]', message)
+        page.click('[data-testid="invitation-submit"]')
+
+        page.wait_for_load_state("domcontentloaded")
+        error_banner = page.query_selector('[data-testid="error-banner"]')
+        if error_banner is not None:
+            status_el = page.query_selector('[data-testid="error-status"]')
+            raise _ServerActionError(
+                message=error_banner.inner_text().strip(),
+                status_code=status_el.inner_text().strip() if status_el else "unknown",
+            )
+        page.wait_for_selector('[data-testid="flash-message"]')
+        for invitation in self._extract_invitations_from_candidate_page():
+            if invitation.id not in before:
+                return invitation
+        raise LookupError("The invitation did not appear on the candidate page after sending")
+
     def _do_toggle_chaos_mode(self, enabled: bool) -> bool:
         self.session.goto("/interviews")
         self.session.page.wait_for_selector('[data-testid="chaos-form"]')
@@ -347,6 +395,25 @@ class RecruitmentBrowser:
                 )
             )
         return interviews
+
+    def _extract_invitations_from_candidate_page(self) -> list[InvitationDetails]:
+        rows = self.session.page.query_selector_all('[data-testid="invitations-table"] tbody tr')
+        invitations = []
+        for row in rows:
+            cells = row.query_selector_all("td")
+            if not cells or cells[0].get_attribute("data-testid") == "invitations-empty":
+                break
+            match = re.match(r"invitation-interview-(.+)", cells[0].get_attribute("data-testid") or "")
+            invitations.append(
+                InvitationDetails(
+                    id=match.group(1) if match else "",
+                    interview_id=cells[0].inner_text().strip(),
+                    to=cells[1].inner_text().strip(),
+                    subject=cells[2].inner_text().strip(),
+                    status=cells[3].inner_text().strip(),
+                )
+            )
+        return invitations
 
     def _current_job_id(self) -> str:
         url = self.session.page.url

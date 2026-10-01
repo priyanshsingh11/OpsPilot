@@ -54,4 +54,42 @@
     </tbody>
   </table>
 </section>
+
+<section class="card">
+  <h2>Interview invitations</h2>
+  <form method="post" action="/candidates/{{ candidate.id }}/invitations" class="stack-form" data-testid="invitation-form">
+    <label for="invitation-to">To</label>
+    <input id="invitation-to" type="text" value="{{ candidate.email }}" readonly data-testid="invitation-to">
+
+    <label for="invitation-interview">Interview</label>
+    <select id="invitation-interview" name="interview_id" data-testid="invitation-interview">
+      {% for i in interviews if i.status == "scheduled" %}
+      <option value="{{ i.id }}">{{ i.round }} · {{ i.scheduled_at }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="invitation-subject">Subject</label>
+    <input id="invitation-subject" name="subject" type="text" required data-testid="invitation-subject">
+
+    <label for="invitation-message">Message</label>
+    <textarea id="invitation-message" name="message" rows="6" required data-testid="invitation-message"></textarea>
+
+    <button type="submit" data-testid="invitation-submit">Send invitation</button>
+  </form>
+  <table class="table" data-testid="invitations-table">
+    <thead><tr><th>Interview</th><th>To</th><th>Subject</th><th>Sent</th></tr></thead>
+    <tbody>
+      {% for v in invitations %}
+      <tr>
+        <td data-testid="invitation-interview-{{ v.id }}">{{ v.interview_id }}</td>
+        <td>{{ v.to }}</td>
+        <td data-testid="invitation-subject-{{ v.id }}">{{ v.subject }}</td>
+        <td data-testid="invitation-status-{{ v.id }}">{{ v.status }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="muted" data-testid="invitations-empty">No invitations sent.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
 {% endblock %}

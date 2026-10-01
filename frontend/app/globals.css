@@ -1,14 +1,32 @@
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-  --border: #d4d4d8;
+  --background: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f1f3f5;
+  --foreground: #171a1f;
+  --muted: #5f6672;
+  --border: #dde1e6;
+  --accent: #2f55d4;
+  --info: #2f55d4;  --info-bg: #e9eefc;
+  --good: #14733c;  --good-bg: #e3f4e9;
+  --warn: #8a5600;  --warn-bg: #fdf0d9;
+  --bad: #b3261e;   --bad-bg: #fbe7e5;
+  --neutral: #4b525d; --neutral-bg: #e9ecef;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-    --border: #3f3f46;
+    --background: #0e1014;
+    --surface: #161920;
+    --surface-2: #1d2129;
+    --foreground: #e8eaee;
+    --muted: #9aa1ad;
+    --border: #2a2f39;
+    --accent: #7b97f5;
+    --info: #8fa8f7;  --info-bg: #1c2540;
+    --good: #5fcf8b;  --good-bg: #14291d;
+    --warn: #e5b565;  --warn-bg: #2f2511;
+    --bad: #f2877f;   --bad-bg: #331816;
+    --neutral: #b3bac5; --neutral-bg: #252a33;
   }
 }
 
@@ -28,7 +46,7 @@ body {
   flex-direction: column;
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

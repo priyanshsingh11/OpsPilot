@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { agentApi, api, type HealthResponse, type Run, type RunEvent, type Scenario } from "@/lib/api";
+import { agentApi, api, type HealthResponse, type Run, type Scenario } from "@/lib/api";
+import { deriveState } from "@/lib/runState";
+import {
+  ApprovalPanel, EvidencePanel, ProgressPanel, RecoveryPanel, ResultPanel,
+  StatusPanel, TimelinePanel, VerificationPanel,
+} from "./panels";
 import styles from "./dashboard.module.css";
 
 type BackendState =
@@ -11,35 +16,6 @@ type BackendState =
 
 const EXAMPLE_GOAL =
   "Schedule a Technical Screen for Aarav Sharma with Priya Nair on 2026-10-08 at 10:00";
-
-// Visual grouping of event types in the timeline.
-const EVENT_TONE: Record<string, string> = {
-  ACTION_FAILED: "bad",
-  BLOCKED: "bad",
-  RECOVERY_STARTED: "warn",
-  RETRY: "warn",
-  STATE_CHECK: "info",
-  VERIFICATION: "info",
-  ACTION_SUCCEEDED: "good",
-  COMPLETED: "good",
-  SKIPPED: "muted",
-  SETUP: "muted",
-};
-
-function EventRow({ event }: { event: RunEvent }) {
-  const tone = EVENT_TONE[event.type] ?? "neutral";
-  const shot = typeof event.data.screenshot === "string" ? event.data.screenshot : null;
-  return (
-    <li className={styles.event}>
-      <span className={`${styles.eventType} ${styles[tone]}`}>{event.type}</span>
-      <span className={styles.eventMessage}>
-        {event.message}
-        {shot && <span className={styles.shot}>screenshot: {shot.split("/").pop()}</span>}
-      </span>
-      <time className={styles.eventTime}>{new Date(event.ts).toLocaleTimeString()}</time>
-    </li>
-  );
-}
 
 export default function Dashboard() {
   const [goal, setGoal] = useState(EXAMPLE_GOAL);
@@ -64,6 +40,7 @@ export default function Dashboard() {
 
   const online = backend.kind === "online";
   const running = run?.status === "running";
+  const state = deriveState(run);
 
   async function startRun() {
     setError(null);
@@ -91,86 +68,63 @@ export default function Dashboard() {
   return (
     <main className={styles.page}>
       <header className={styles.header}>
-        <h1>OpsPilot</h1>
+        <div>
+          <h1>OpsPilot</h1>
+          <p className={styles.tagline}>AI operations console · recruitment workflow</p>
+        </div>
         <span className={`${styles.badge} ${styles[backend.kind]}`}>
           {backend.kind === "checking" && "Checking backend…"}
           {backend.kind === "online" && `Backend ${backend.health.status} · v${backend.health.version}`}
           {backend.kind === "offline" && "Backend offline"}
         </span>
       </header>
+      {backend.kind === "offline" && <p className={styles.error}>{backend.error}</p>}
 
-      <section className={styles.card}>
-        <label htmlFor="goal">Goal</label>
+      <section className={`${styles.panel} ${styles.goalPanel}`}>
+        <h2><span className={styles.num}>1</span>Goal</h2>
         <textarea
           id="goal"
-          rows={3}
+          aria-label="Goal"
+          rows={2}
           value={goal}
           onChange={(e) => setGoal(e.target.value)}
           placeholder="Schedule a <round> for <candidate> with <interviewer> on <date> at <time>"
         />
         <div className={styles.controls}>
-          <label htmlFor="scenario">Failure scenario</label>
-          <select id="scenario" value={scenario} onChange={(e) => setScenario(e.target.value)}>
-            {scenarios.map((s) => (
-              <option key={s.key} value={s.key}>{s.label}</option>
-            ))}
-          </select>
-          <label className={styles.check}>
+          <div className={styles.field}>
+            <label htmlFor="scenario">Failure scenario</label>
+            <select id="scenario" value={scenario} onChange={(e) => setScenario(e.target.value)}>
+              {scenarios.map((s) => (
+                <option key={s.key} value={s.key}>{s.label}</option>
+              ))}
+            </select>
+          </div>
+          <label className={styles.checkbox}>
             <input type="checkbox" checked={resetData} onChange={(e) => setResetData(e.target.checked)} />
             Reset demo data first
           </label>
+          <button className={styles.run} disabled={!online || running || goal.trim().length < 3} onClick={startRun}>
+            {running ? "Running…" : "Run agent"}
+          </button>
         </div>
-        {selected && <p className={styles.hint}>{selected.description}</p>}
-        <button disabled={!online || running || goal.trim().length < 3} onClick={startRun}>
-          {running ? "Running…" : "Run Agent"}
-        </button>
+        {selected && <p className={styles.meta}>{selected.description}</p>}
         {error && <p className={styles.error}>{error}</p>}
       </section>
 
-      <div className={styles.grid}>
-        <section className={styles.card}>
-          <h2>Execution Status</h2>
-          {backend.kind === "offline" ? (
-            <p className={styles.error}>{backend.error}</p>
-          ) : !run ? (
-            <p>{online ? "Idle — backend connected." : "Connecting…"}</p>
-          ) : (
-            <>
-              <p>
-                <span className={`${styles.status} ${styles[run.status]}`}>{run.status}</span>
-              </p>
-              <p className={styles.hint}>
-                Run {run.id} · {run.events.length} event(s)
-                {run.scenario ? ` · scenario: ${run.scenario}` : ""}
-              </p>
-            </>
-          )}
-        </section>
+      <StatusPanel run={run} state={state} />
+      <ResultPanel run={run} state={state} />
 
-        <section className={styles.card}>
-          <h2>Result</h2>
-          {!run || run.status === "running" ? (
-            <p className={styles.empty}>No result yet.</p>
-          ) : run.status === "completed" ? (
-            <p>{run.summary}</p>
-          ) : (
-            <p className={styles.error}><strong>Blocked:</strong> {run.blocker}</p>
-          )}
-        </section>
+      <div className={styles.columns}>
+        <TimelinePanel run={run} starting={!!running} />
+        <div className={styles.side}>
+          <ProgressPanel run={run} state={state} />
+          <ApprovalPanel run={run} />
+          <RecoveryPanel run={run} />
+          <VerificationPanel run={run} />
+        </div>
       </div>
 
-      <section className={styles.card}>
-        <h2>Activity Timeline</h2>
-        {!run || run.events.length === 0 ? (
-          <p className={styles.empty}>{running ? "Starting…" : "No activity yet."}</p>
-        ) : (
-          <ol className={styles.timeline}>
-            {run.events.map((e) => (
-              <EventRow key={e.seq} event={e} />
-            ))}
-          </ol>
-        )}
-      </section>
+      <EvidencePanel run={run} />
     </main>
   );
 }
