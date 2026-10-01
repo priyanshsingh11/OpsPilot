@@ -13,6 +13,8 @@
     </button>
   </form>
   <p data-testid="chaos-state">Chaos mode: <strong>{{ "ON" if chaos_mode else "off" }}</strong></p>
+  <p class="muted" data-testid="failure-plan">Failure plan: next <strong data-testid="failure-remaining">{{ failure.remaining }}</strong>
+    interview create(s) will fail · mode <strong data-testid="failure-mode">{{ failure.mode }}</strong></p>
 </section>
 
 <table class="table" data-testid="interviews-table">

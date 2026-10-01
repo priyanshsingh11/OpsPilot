@@ -11,14 +11,16 @@ Run locally:
 from datetime import datetime
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .models import CANDIDATE_STATUSES
-from .store import InterviewServiceError, store
+from .store import FAILURE_MODES, InterviewServiceError, store
 
 app = FastAPI(title="Synthetic Recruitment App", version="0.1.0")
 templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -209,7 +211,7 @@ def interviews(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "interviews.html",
-        {"interviews": rows, "chaos_mode": store.chaos_mode, "now": _now()},
+        {"interviews": rows, "chaos_mode": store.chaos_mode, "failure": store.failure_state(), "now": _now()},
     )
 
 
@@ -217,6 +219,32 @@ def interviews(request: Request) -> HTMLResponse:
 def toggle_chaos(request: Request, enable: str = Form(...)) -> RedirectResponse:
     store.chaos_mode = enable == "1"
     return RedirectResponse(url="/interviews", status_code=303)
+
+
+@app.post("/admin/failure")
+def arm_failure(remaining: int = Form(...), mode: str = Form("before_write")) -> RedirectResponse:
+    """Demo harness: make the next `remaining` interview creates fail in `mode`."""
+    if mode not in FAILURE_MODES:
+        return JSONResponse({"error": f"mode must be one of {FAILURE_MODES}"}, status_code=400)
+    store.set_failure_plan(remaining, mode)
+    return RedirectResponse(url="/interviews", status_code=303)
+
+
+@app.post("/admin/reset")
+def reset_data() -> RedirectResponse:
+    """Demo harness: restore seed data and the environment's failure plan."""
+    store.reset()
+    return RedirectResponse(url="/jobs", status_code=303)
+
+
+@app.get("/api/state")
+def api_state() -> JSONResponse:
+    """Read-only JSON snapshot for independent verification (not for performing actions)."""
+    return JSONResponse({
+        "candidates": store.list_candidates_all(),
+        "interviews": store.list_interviews(),
+        "failure": store.failure_state(),
+    })
 
 
 def _now() -> str:

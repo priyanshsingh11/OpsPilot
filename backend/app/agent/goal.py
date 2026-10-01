@@ -1,10 +1,10 @@
 """Deterministic parser for plain-English interview scheduling goals.
 
-Names are not hard-coded: the candidate and interviewer lists are read from the
-app at run time and matched against the goal text, so a different candidate,
-interviewer, date, time or duration works without code changes.
+Candidate names are not hard-coded: they are read from the app at run time and
+matched against the goal text, so a different candidate, round, interviewer,
+date or time works without code changes.
 
-Example: "Schedule a 45-minute interview for Rahul Sharma with Vikram Desai on 2026-10-02 at 10:00"
+Example: "Schedule a Technical Screen for Aarav Sharma with Priya Nair on 2026-10-08 at 10:00"
 """
 
 from __future__ import annotations
@@ -15,7 +15,8 @@ from datetime import date, timedelta
 
 MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], start=1)}
-DEFAULT_DURATION = 60
+DEFAULT_ROUND = "Interview"
+NAME = r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2}"
 
 
 class GoalError(ValueError):
@@ -29,14 +30,13 @@ class GoalError(ValueError):
 @dataclass
 class InterviewGoal:
     candidate_name: str
+    round_name: str
     interviewer: str
-    date: str  # YYYY-MM-DD
-    start_time: str  # HH:MM
-    duration_minutes: int
+    scheduled_at: str  # YYYY-MM-DDTHH:MM, the format of the app's datetime-local field
     assumptions: list[str] = field(default_factory=list)
 
 
-def _find_name(text: str, names: list[str]) -> list[str]:
+def _find_names(text: str, names: list[str]) -> list[str]:
     low = text.lower()
     return [n for n in names if re.search(rf"\b{re.escape(n.lower())}\b", low)]
 
@@ -74,40 +74,44 @@ def _parse_time(text: str) -> str | None:
     return f"{hour:02d}:{minute:02d}"
 
 
-def _parse_duration(text: str) -> int | None:
-    low = text.lower()
-    if m := re.search(r"\b(\d{1,3})\s*-?\s*(?:min|mins|minute|minutes)\b", low):
-        return int(m[1])
-    if re.search(r"\b(?:an|one|1)\s*-?\s*hours?\b", low):
-        return 60
-    if re.search(r"\bhalf\s*-?\s*(?:an\s+)?hour\b", low):
-        return 30
-    return None
+def _parse_round(text: str, candidate: str) -> str | None:
+    """'Schedule a technical screen for X' -> 'Technical Screen'."""
+    m = re.search(rf"\b(?:schedule|book|set up|arrange)\s+(?:an?\s+|the\s+)?(.+?)\s+(?:with\s+{NAME}\s+)?for\s+"
+                  rf"{re.escape(candidate)}", text, re.I)
+    if not m:
+        return None
+    words = m[1].strip()
+    if words.lower() in ("interview", "an interview", "interviews"):
+        return None
+    return " ".join(w if w.isupper() else w.capitalize() for w in words.split())
 
 
-def parse_interview_goal(text: str, candidates: list[str], interviewers: list[str],
+def parse_interview_goal(text: str, candidates: list[str], known_interviewers: list[str] = (),
                          today: date | None = None) -> InterviewGoal:
     today = today or date.today()
     problems: list[str] = []
-    if not re.search(r"\b(schedule|book|set up|arrange)\b", text, re.I) or "interview" not in text.lower():
-        problems.append("Goal is not an interview scheduling request "
-                        "(expected e.g. 'Schedule an interview for <candidate> with <interviewer> on <date> at <time>').")
+    if not re.search(r"\b(schedule|book|set up|arrange)\b", text, re.I):
+        problems.append("Goal is not an interview scheduling request (expected e.g. 'Schedule a Technical "
+                        "Screen for <candidate> with <interviewer> on <date> at <time>').")
 
-    # Interviewer names are matched first so they are not mistaken for candidates.
-    who = _find_name(text, interviewers)
-    cands = [c for c in _find_name(text, candidates) if c not in who]
-    if len(cands) != 1:
-        problems.append("No known candidate named in the goal." if not cands
-                        else f"Goal names more than one candidate: {', '.join(cands)}.")
-    if len(who) != 1:
-        problems.append(f"Name exactly one interviewer ({', '.join(interviewers)})." if not who
-                        else f"Goal names more than one interviewer: {', '.join(who)}.")
+    found = _find_names(text, candidates)
+    if len(found) != 1:
+        problems.append("No known candidate named in the goal." if not found
+                        else f"Goal names more than one candidate: {', '.join(found)}.")
+
+    # Interviewer: a known hiring manager if mentioned, else any capitalised name after "with".
+    interviewer = next(iter(_find_names(text, list(known_interviewers))), None)
+    if interviewer is None and (m := re.search(rf"\bwith\s+({NAME})", text)):
+        interviewer = m[1] if m[1] not in found else None
+    if not interviewer:
+        problems.append("No interviewer found (e.g. 'with Priya Nair').")
+
     try:
         day = _parse_date(text, today)
     except ValueError:
         day = None
     if day is None:
-        problems.append("No valid interview date found (use YYYY-MM-DD, 'October 2' or 'tomorrow').")
+        problems.append("No valid interview date found (use YYYY-MM-DD, 'October 8' or 'tomorrow').")
     start = _parse_time(text)
     if start is None:
         problems.append("No start time found (e.g. 'at 10:00' or 'at 3pm').")
@@ -115,8 +119,8 @@ def parse_interview_goal(text: str, candidates: list[str], interviewers: list[st
         raise GoalError(problems)
 
     assumptions = []
-    duration = _parse_duration(text)
-    if duration is None:
-        duration = DEFAULT_DURATION
-        assumptions.append(f"No duration given; using the app default of {DEFAULT_DURATION} minutes.")
-    return InterviewGoal(cands[0], who[0], day, start, duration, assumptions)
+    round_name = _parse_round(text, found[0])
+    if round_name is None:
+        round_name = DEFAULT_ROUND
+        assumptions.append(f"No interview round named; using '{DEFAULT_ROUND}'.")
+    return InterviewGoal(found[0], round_name, interviewer, f"{day}T{start}", assumptions)

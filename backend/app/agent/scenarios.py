@@ -1,6 +1,6 @@
 """Reproducible failure scenarios for demos and tests.
 
-Each scenario arms the demo app's calendar failure simulation (demo-app/db.py) with a
+Each scenario arms the demo app's interview-service failure plan (demo-app/app/store.py) with a
 fixed count and mode, so a run behaves the same way every time:
 
 - none:             no failure.

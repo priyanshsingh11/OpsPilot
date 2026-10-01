@@ -5,3 +5,5 @@ __pycache__/
 *.db
 .DS_Store
 demo-app/recruitment.db
+screenshots/
+.pytest_cache/

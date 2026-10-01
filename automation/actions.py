@@ -123,6 +123,19 @@ class RecruitmentBrowser:
         """Toggle the app's simulated-outage switch (test/recovery helper)."""
         return self._run("toggle_chaos_mode", lambda: self._do_toggle_chaos_mode(enabled))
 
+    def arm_failure_plan(self, remaining: int, mode: str = "before_write") -> ActionResult[dict]:
+        """Arm a deterministic failure plan: the next `remaining` interview
+        creates fail. Mode is "before_write" (nothing saved) or "after_write"
+        (saved but the request still fails)."""
+        return self._run(
+            "arm_failure_plan",
+            lambda: self._do_arm_failure_plan(remaining, mode),
+        )
+
+    def reset_state(self) -> ActionResult[bool]:
+        """Reset the app to its seed state (test isolation helper)."""
+        return self._run("reset_state", self._do_reset_state)
+
     # --- Action implementations ---
 
     def _do_open_jobs(self) -> list[JobSummary]:
@@ -150,14 +163,14 @@ class RecruitmentBrowser:
     def _do_select_job(self, title: str) -> JobSummary:
         self.session.goto("/jobs")
         self.session.page.wait_for_selector('[data-testid="jobs-table"]')
+        # Read the full summary from the jobs table before navigating in.
+        jobs = self._do_open_jobs()
+        match = next((j for j in jobs if j.title == title), None)
+        if match is None:
+            raise LookupError(f"Job '{title}' not found in jobs list")
         self.session.page.get_by_role("link", name=title, exact=True).click()
         self.session.page.wait_for_selector('[data-testid="job-title"]')
-        # Re-read the job from the jobs table data for a complete summary.
-        jobs = self._do_open_jobs()
-        for job in jobs:
-            if job.title == title:
-                return job
-        raise LookupError(f"Job '{title}' not found after navigation")
+        return match
 
     def _do_filter_candidates(
         self, job_id: str, status: str | None, query: str | None
@@ -170,8 +183,11 @@ class RecruitmentBrowser:
             self.session.page.fill('[data-testid="filter-query"]', query)
         self.session.page.click('[data-testid="filter-submit"]')
         self.session.page.wait_for_selector('[data-testid="candidates-table"]')
-        # Wait for the filtered table to render (URL now carries the filter).
-        self.session.page.wait_for_url(re.compile(r"[?&]status="))
+        # Wait for the filtered table to render (URL now carries the applied filter).
+        if status:
+            self.session.page.wait_for_url(re.compile(r"[?&]status="))
+        if query:
+            self.session.page.wait_for_url(re.compile(r"[?&]q="))
         rows = self.session.page.query_selector_all('[data-testid="candidates-table"] tbody tr')
         candidates = []
         for row in rows:
@@ -285,6 +301,27 @@ class RecruitmentBrowser:
             self.session.page.click('[data-testid="chaos-toggle"]')
             self.session.page.wait_for_selector('[data-testid="chaos-state"]')
         return enabled
+
+    def _do_arm_failure_plan(self, remaining: int, mode: str) -> dict:
+        self.session.goto("/interviews")
+        self.session.page.wait_for_selector('[data-testid="failure-plan"]')
+        # The failure plan is armed via the /admin/failure endpoint. It is a
+        # plain POST form; submit it directly and read back the armed state.
+        self.session.page.request.post(
+            self.session.url_for("/admin/failure"),
+            form={"remaining": str(remaining), "mode": mode},
+        )
+        self.session.goto("/interviews")
+        self.session.page.wait_for_selector('[data-testid="failure-plan"]')
+        remaining_text = self.session.page.text_content('[data-testid="failure-remaining"]').strip()
+        mode_text = self.session.page.text_content('[data-testid="failure-mode"]').strip()
+        return {"remaining": int(remaining_text), "mode": mode_text}
+
+    def _do_reset_state(self) -> bool:
+        self.session.page.request.post(self.session.url_for("/admin/reset"))
+        self.session.goto("/jobs")
+        self.session.page.wait_for_selector('[data-testid="jobs-table"]')
+        return True
 
     # --- Extraction helpers ---
 
