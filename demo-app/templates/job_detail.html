@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}{{ job.title }} · Recruiting{% endblock %}
+{% block content %}
+<h1 data-testid="job-title">{{ job.title }}</h1>
+<p class="muted">
+  {{ job.department }} · {{ job.location }} · Hiring manager: {{ job.hiring_manager }} ·
+  <span class="pill pill-{{ job.status }}">{{ job.status }}</span>
+</p>
+
+<section class="card">
+  <h2>Filter candidates</h2>
+  <form method="get" action="/jobs/{{ job.id }}" class="inline-form" data-testid="candidate-filter-form">
+    <label for="status">Status</label>
+    <select id="status" name="status" data-testid="filter-status">
+      <option value="">All</option>
+      {% for s in statuses %}
+      <option value="{{ s }}" {{ "selected" if s == status_filter else "" }}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    <label for="q">Search</label>
+    <input id="q" name="q" type="text" value="{{ query }}" placeholder="name, email, or skill" data-testid="filter-query">
+    <button type="submit" data-testid="filter-submit">Apply</button>
+  </form>
+</section>
+
+<h2>Candidates</h2>
+<table class="table" data-testid="candidates-table">
+  <thead>
+    <tr><th>Name</th><th>Email</th><th>Experience</th><th>Skills</th><th>Status</th></tr>
+  </thead>
+  <tbody>
+    {% for c in candidates %}
+    <tr>
+      <td><a data-testid="candidate-link-{{ c.id }}" href="/candidates/{{ c.id }}">{{ c.name }}</a></td>
+      <td>{{ c.email }}</td>
+      <td>{{ c.experience_years }} yrs</td>
+      <td>{{ c.skills | join(", ") }}</td>
+      <td><span class="pill pill-{{ c.status }}" data-testid="candidate-status-{{ c.id }}">{{ c.status }}</span></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="muted" data-testid="candidates-empty">No candidates match this filter.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{{ candidate.name }} · Recruiting{% endblock %}
+{% block content %}
+<p class="muted"><a href="/jobs/{{ job.id }}">&larr; Back to {{ job.title }}</a></p>
+
+<h1 data-testid="candidate-name">{{ candidate.name }}</h1>
+<p class="muted" data-testid="candidate-email">{{ candidate.email }}</p>
+
+{% if request.query_params.get("flash") %}
+<p class="flash" data-testid="flash-message">{{ request.query_params.get("flash") }}</p>
+{% endif %}
+
+<section class="card">
+  <h2>Profile</h2>
+  <dl class="facts">
+    <dt>Status</dt><dd><span class="pill pill-{{ candidate.status }}" data-testid="candidate-current-status">{{ candidate.status }}</span></dd>
+    <dt>Experience</dt><dd data-testid="candidate-experience">{{ candidate.experience_years }} years</dd>
+    <dt>Skills</dt><dd data-testid="candidate-skills">{{ candidate.skills | join(", ") }}</dd>
+  </dl>
+  <p data-testid="candidate-summary">{{ candidate.summary }}</p>
+</section>
+
+<section class="card">
+  <h2>Update status</h2>
+  <form method="post" action="/candidates/{{ candidate.id }}/status" class="inline-form" data-testid="status-form">
+    <label for="status">New status</label>
+    <select id="status" name="status" data-testid="status-select">
+      {% for s in statuses %}
+      <option value="{{ s }}" {{ "selected" if s == candidate.status else "" }}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" data-testid="status-submit">Update</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Interviews</h2>
+  <a class="button" data-testid="schedule-interview-link" href="/candidates/{{ candidate.id }}/interviews/new">Schedule interview</a>
+  <table class="table" data-testid="interviews-table">
+    <thead>
+      <tr><th>Round</th><th>Scheduled</th><th>Interviewer</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      {% for i in interviews %}
+      <tr>
+        <td data-testid="interview-round-{{ i.id }}">{{ i.round }}</td>
+        <td data-testid="interview-scheduled-{{ i.id }}">{{ i.scheduled_at }}</td>
+        <td>{{ i.interviewer }}</td>
+        <td><span class="pill pill-{{ i.status }}" data-testid="interview-status-{{ i.id }}">{{ i.status }}</span></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="muted" data-testid="interviews-empty">No interviews yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

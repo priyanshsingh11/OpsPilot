@@ -1,5 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Error{% endblock %}
+{% block title %}Error · Recruiting{% endblock %}
 {% block content %}
-<p><a href="/">Back to jobs</a></p>
+<h1>Something went wrong</h1>
+<p class="error-banner" data-testid="error-banner">{{ message }}</p>
+<p class="muted">Status code: <span data-testid="error-status">{{ status_code if status_code is defined else 500 }}</span></p>
+<p><a href="/jobs">Back to jobs</a></p>
 {% endblock %}

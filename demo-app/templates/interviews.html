@@ -1,8 +1,37 @@
-{% extends "base.html" %}{% block body %}
-<h1>Interviews</h1>
-<form method="get"><input type="date" name="day" value="{{ day }}" data-testid="cal-day"><button data-testid="cal-apply">Show</button></form>
-<table><tr><th>Date</th><th>Start</th><th>Min</th><th>Interviewer</th><th>Candidate</th></tr>
-{% for r in rows %}<tr data-testid="interview-row" data-day="{{ r.day }}" data-start="{{ r.start }}" data-duration="{{ r.duration }}" data-interviewer="{{ r.interviewer }}" data-candidate="{{ r.name }}">
-<td>{{ r.day }}</td><td>{{ r.start }}</td><td>{{ r.duration }}</td><td>{{ r.interviewer }}</td><td>{{ r.name }}</td></tr>
-{% else %}<tr><td colspan="5">No interviews.</td></tr>{% endfor %}</table>
+{% extends "base.html" %}
+{% block title %}Interviews · Recruiting{% endblock %}
+{% block content %}
+<h1>Scheduled interviews</h1>
+
+<section class="card">
+  <h2>Chaos mode</h2>
+  <p class="muted">Simulates an interview-service outage. While enabled, scheduling a new interview fails.</p>
+  <form method="post" action="/admin/chaos" class="inline-form" data-testid="chaos-form">
+    <input type="hidden" name="enable" value="{{ "0" if chaos_mode else "1" }}">
+    <button type="submit" data-testid="chaos-toggle">
+      {{ "Disable chaos mode" if chaos_mode else "Enable chaos mode" }}
+    </button>
+  </form>
+  <p data-testid="chaos-state">Chaos mode: <strong>{{ "ON" if chaos_mode else "off" }}</strong></p>
+</section>
+
+<table class="table" data-testid="interviews-table">
+  <thead>
+    <tr><th>Candidate</th><th>Job</th><th>Round</th><th>Scheduled</th><th>Interviewer</th><th>Status</th></tr>
+  </thead>
+  <tbody>
+    {% for i in interviews %}
+    <tr>
+      <td><a href="/candidates/{{ i.candidate_id }}">{{ i.candidate_name }}</a></td>
+      <td>{{ i.job_title }}</td>
+      <td>{{ i.round }}</td>
+      <td>{{ i.scheduled_at }}</td>
+      <td>{{ i.interviewer }}</td>
+      <td><span class="pill pill-{{ i.status }}">{{ i.status }}</span></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="muted" data-testid="interviews-empty">No interviews scheduled.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
 {% endblock %}

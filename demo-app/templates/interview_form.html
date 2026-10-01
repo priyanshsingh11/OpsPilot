@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Schedule interview · {{ candidate.name }}{% endblock %}
+{% block content %}
+<p class="muted"><a href="/candidates/{{ candidate.id }}">&larr; Back to {{ candidate.name }}</a></p>
+
+<h1>Schedule interview — {{ candidate.name }}</h1>
+
+{% if error %}
+<p class="error-banner" data-testid="form-error">{{ error }}</p>
+{% endif %}
+
+<form method="post" action="/candidates/{{ candidate.id }}/interviews" class="stack-form" data-testid="interview-form">
+  <label for="round_name">Round</label>
+  <input id="round_name" name="round_name" type="text" required placeholder="e.g. Technical Screen" data-testid="interview-round">
+
+  <label for="scheduled_at">Scheduled at</label>
+  <input id="scheduled_at" name="scheduled_at" type="datetime-local" required data-testid="interview-scheduled-at">
+
+  <label for="interviewer">Interviewer</label>
+  <input id="interviewer" name="interviewer" type="text" required placeholder="e.g. Priya Nair" data-testid="interview-interviewer">
+
+  <button type="submit" data-testid="interview-submit">Schedule interview</button>
+</form>
+{% endblock %}

@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     # Comma-separated list of allowed browser origins.
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
+    # Synthetic recruitment app the agent operates (demo-app/).
+    demo_app_url: str = "http://127.0.0.1:5001"
+    demo_app_timeout_seconds: float = 5.0
+    # Failure recovery: total attempts for a mutating action, and wait between them.
+    agent_max_attempts: int = 3
+    agent_retry_backoff_seconds: float = 1.0
+    # Pause between agent steps so a live run is watchable in the dashboard / demo video.
+    agent_step_delay_seconds: float = 0.3
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
