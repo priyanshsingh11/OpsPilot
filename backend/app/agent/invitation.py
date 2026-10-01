@@ -79,8 +79,11 @@ def verify_invitation(harness: HarnessClient, log: ev.RunLog, payload: dict,
         return InvitationOutcome("failed", "Invitation could not be verified", blocker=str(exc))
     mine = [v for v in state["invitations"]
             if v["candidate_id"] == payload["candidate_id"] and v["interview_id"] == payload["interview_id"]]
-    exact = [v for v in mine if v["to"] == payload["to"] and v["subject"] == payload["subject"]
-             and v["message"] == payload["message"].strip()]
+    def same_text(a: str, b: str) -> bool:
+        return a.replace("\r\n", "\n").strip() == b.replace("\r\n", "\n").strip()
+
+    exact = [v for v in mine if v["to"] == payload["to"] and same_text(v["subject"], payload["subject"])
+             and same_text(v["message"], payload["message"])]
     passed = len(mine) == 1 and (len(exact) == 1 or not check_content)
     if passed:
         msg = (f"Verified in the app's records: exactly 1 invitation ({mine[0]['id']}) to {payload['to']} "

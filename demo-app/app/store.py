@@ -139,7 +139,7 @@ class Store:
             "interview_id": interview_id,
             "to": candidate["email"],
             "subject": subject.strip(),
-            "message": message.strip(),
+            "message": message.replace("\r\n", "\n").strip(),  # browsers submit CRLF
             "status": "sent",
             "sent_at": datetime.now().isoformat(timespec="seconds"),
         }
