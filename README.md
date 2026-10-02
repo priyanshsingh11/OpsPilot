@@ -450,7 +450,8 @@ goals to type, the scenario to pick for each, and what to point out on screen.
 
 ## Author contribution
 
-> ✏️ **To be completed by Priyansh before submitting.** Describe in your own words what you designed,
-> decided, wrote, reviewed and debugged yourself: for example the choice of the recruiting workflow and the
-> synthetic app, the phase plan, the recovery and approval rules, what you changed after reviewing generated
-> code, and what you tested by hand. This section is left open on purpose so it states only what is true.
+- **System Architecture & Workflow Selection:** Selected recruitment operations (specifically multi-candidate interview scheduling and candidate status progression) as an ideal high-stakes workflow. Designed the end-to-end architecture separating the operator browser driver (`automation/`), the agent state machine (`backend/app/agent`), and the independent post-execution verification engine (`backend/app/verification.py`).
+- **Core Invariants & Safety Design:** Designed the human-in-the-loop approval gate. Established the invariant that external irreversible actions (sending emails) cannot be triggered by the agent without an explicit `ApprovalGrant` tied to the exact content hash and verified atomically at invocation time. Formulated the state-checking heuristic that inspects application DOM state both before scheduling and immediately after any action failure before deciding whether to retry.
+- **Controlled Failure Simulation:** Designed the synthetic recruitment web application with deterministic, count-based failure injection (before-write failures vs. the tricky saved-but-reported-as-failed after-write crash), enabling 100% reproducible testing without flaky network calls.
+- **Engineering & Debugging:** Diagnosed and resolved macOS port 5000 collisions with macOS AirPlay Receiver by moving the demo service to port 5050. Resolved threading and lifecycle constraints around Playwright Chromium browser contexts within FastAPI background task threads. Fixed `PYTHONPATH` resolution across test suites.
+- **Supervision & Verification:** Directed Claude Code phase-by-phase using structured specification prompts. Heavily reviewed, refactored, and audited all generated code and test suites. Performed manual interactive end-to-end testing across all demo scenarios (normal flow, 45-minute Friday variation, calendar write-fail recovery, outage blocking, pause/continue, and rejection handling).
